@@ -376,7 +376,7 @@ fn collect_airway_segments(connection: &Connection, sql: String, west: f64, sout
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-fn map_lnm_airways(connection: &Connection, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationAirway>, String> {
+fn map_lnm_airways(connection: &Connection, west: f64, south: f64, east: f64, north: f64, limit: usize) -> Result<Vec<NavigationAirway>, String> {
     if !table_exists(connection, "airway")? || !table_exists(connection, "waypoint")? { return Ok(Vec::new()); }
     let airway_columns = table_columns(connection, "airway")?;
     let waypoint_columns = table_columns(connection, "waypoint")?;
@@ -389,18 +389,18 @@ fn map_lnm_airways(connection: &Connection, west: f64, south: f64, east: f64, no
     let to_longitude = match find_column(&waypoint_columns, &["lonx"]) { Some(column) => qualified_number_expression("to_point", Some(column)), None => return Ok(Vec::new()) };
     let name = qualified_text_expression("leg", find_column(&airway_columns, &["airway_name", "name", "ident"]));
     let sql = format!(
-        "SELECT {name}, {from_longitude}, {from_latitude}, {to_longitude}, {to_latitude} FROM \"airway\" AS leg JOIN \"waypoint\" AS from_point ON leg.{} = from_point.{} JOIN \"waypoint\" AS to_point ON leg.{} = to_point.{} WHERE MAX({from_latitude}, {to_latitude}) >= ?1 AND MIN({from_latitude}, {to_latitude}) <= ?2 AND MAX({from_longitude}, {to_longitude}) >= ?3 AND MIN({from_longitude}, {to_longitude}) <= ?4 LIMIT 4000",
-        quote_identifier(&from_leg), quote_identifier(&waypoint_id), quote_identifier(&to_leg), quote_identifier(&waypoint_id)
+        "SELECT {name}, {from_longitude}, {from_latitude}, {to_longitude}, {to_latitude} FROM \"airway\" AS leg JOIN \"waypoint\" AS from_point ON leg.{} = from_point.{} JOIN \"waypoint\" AS to_point ON leg.{} = to_point.{} WHERE MAX({from_latitude}, {to_latitude}) >= ?1 AND MIN({from_latitude}, {to_latitude}) <= ?2 AND MAX({from_longitude}, {to_longitude}) >= ?3 AND MIN({from_longitude}, {to_longitude}) <= ?4 LIMIT {limit}",
+        quote_identifier(&from_leg), quote_identifier(&waypoint_id), quote_identifier(&to_leg), quote_identifier(&waypoint_id),
     );
     collect_airway_segments(connection, sql, west, south, east, north)
 }
 
-fn map_fenix_airways(connection: &Connection, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationAirway>, String> {
+fn map_fenix_airways(connection: &Connection, west: f64, south: f64, east: f64, north: f64, limit: usize) -> Result<Vec<NavigationAirway>, String> {
     if !table_exists(connection, "AirwayLegs")? || !table_exists(connection, "Waypoints")? { return Ok(Vec::new()); }
     let leg_columns = table_columns(connection, "AirwayLegs")?;
     let waypoint_columns = table_columns(connection, "Waypoints")?;
-    let from_leg = match find_column(&leg_columns, &["fromwaypointid", "from_waypoint_id", "from_fix_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
-    let to_leg = match find_column(&leg_columns, &["towaypointid", "to_waypoint_id", "to_fix_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
+    let from_leg = match find_column(&leg_columns, &["fromwaypointid", "from_waypoint_id", "fromwaypoint", "from_waypoint", "from_fix_id", "fromfixid"]) { Some(column) => column, None => return Ok(Vec::new()) };
+    let to_leg = match find_column(&leg_columns, &["towaypointid", "to_waypoint_id", "towaypoint", "to_waypoint", "to_fix_id", "tofixid"]) { Some(column) => column, None => return Ok(Vec::new()) };
     let waypoint_id = match find_column(&waypoint_columns, &["id", "waypointid", "waypoint_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
     let from_latitude = match find_column(&waypoint_columns, &["latitude", "lat", "laty", "latitude_degrees"]) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
     let from_longitude = match find_column(&waypoint_columns, &["longitude", "lon", "lonx", "longitude_degrees"]) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
@@ -416,25 +416,26 @@ fn map_fenix_airways(connection: &Connection, west: f64, south: f64, east: f64, 
         }
     }
     let sql = format!(
-        "SELECT {name}, {from_longitude}, {from_latitude}, {to_longitude}, {to_latitude} FROM \"AirwayLegs\" AS leg JOIN \"Waypoints\" AS from_point ON leg.{} = from_point.{} JOIN \"Waypoints\" AS to_point ON leg.{} = to_point.{}{joins} WHERE MAX({from_latitude}, {to_latitude}) >= ?1 AND MIN({from_latitude}, {to_latitude}) <= ?2 AND MAX({from_longitude}, {to_longitude}) >= ?3 AND MIN({from_longitude}, {to_longitude}) <= ?4 LIMIT 4000",
-        quote_identifier(&from_leg), quote_identifier(&waypoint_id), quote_identifier(&to_leg), quote_identifier(&waypoint_id)
+        "SELECT {name}, {from_longitude}, {from_latitude}, {to_longitude}, {to_latitude} FROM \"AirwayLegs\" AS leg JOIN \"Waypoints\" AS from_point ON leg.{} = from_point.{} JOIN \"Waypoints\" AS to_point ON leg.{} = to_point.{}{joins} WHERE MAX({from_latitude}, {to_latitude}) >= ?1 AND MIN({from_latitude}, {to_latitude}) <= ?2 AND MAX({from_longitude}, {to_longitude}) >= ?3 AND MIN({from_longitude}, {to_longitude}) <= ?4 LIMIT {limit}",
+        quote_identifier(&from_leg), quote_identifier(&waypoint_id), quote_identifier(&to_leg), quote_identifier(&waypoint_id),
     );
     collect_airway_segments(connection, sql, west, south, east, north)
 }
 
-fn map_airways(connection: &Connection, source: &NavigationSource, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationAirway>, String> {
-    match source { NavigationSource::Lnm => map_lnm_airways(connection, west, south, east, north), NavigationSource::Fenix => map_fenix_airways(connection, west, south, east, north) }
+fn map_airways(connection: &Connection, source: &NavigationSource, west: f64, south: f64, east: f64, north: f64, zoom: f64) -> Result<Vec<NavigationAirway>, String> {
+    let limit = if zoom < 4.5 { 1_500 } else if zoom < 6.0 { 4_000 } else if zoom < 8.0 { 8_000 } else { 12_000 };
+    match source { NavigationSource::Lnm => map_lnm_airways(connection, west, south, east, north, limit), NavigationSource::Fenix => map_fenix_airways(connection, west, south, east, north, limit) }
 }
 
 #[tauri::command]
-pub fn get_navigation_map_data(west: f64, south: f64, east: f64, north: f64) -> Result<NavigationMapData, String> {
-    if !(-180.0..=180.0).contains(&west) || !(-180.0..=180.0).contains(&east) || !(-90.0..=90.0).contains(&south) || !(-90.0..=90.0).contains(&north) || west >= east || south >= north {
+pub fn get_navigation_map_data(west: f64, south: f64, east: f64, north: f64, zoom: f64) -> Result<NavigationMapData, String> {
+    if !(-180.0..=180.0).contains(&west) || !(-180.0..=180.0).contains(&east) || !(-90.0..=90.0).contains(&south) || !(-90.0..=90.0).contains(&north) || !(0.0..=22.0).contains(&zoom) || west >= east || south >= north {
         return Err("地图可视范围无效".to_string());
     }
     let (source, connection) = selected_connection()?;
     Ok(NavigationMapData {
         airports: map_airports(&connection, &source, west, south, east, north)?,
         navaids: map_navaids(&connection, &source, west, south, east, north)?,
-        airways: map_airways(&connection, &source, west, south, east, north)?,
+        airways: map_airways(&connection, &source, west, south, east, north, zoom)?,
     })
 }

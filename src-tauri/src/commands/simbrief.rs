@@ -59,7 +59,7 @@ fn is_non_enroute_fix(fix: &serde_json::Map<String, Value>) -> bool {
         .iter()
         .filter_map(|key| fix.get(*key))
         .map(|value| value_text(Some(value)).to_uppercase())
-        .any(|value| ["SID", "STAR", "APP", "APPROACH", "ARRIVAL", "DEPARTURE", "CLB", "DES", "CLIMB", "DESCENT", "TERMINAL", "AIRPORT", "APT"].iter().any(|excluded| value == *excluded || value.contains(excluded)));
+        .any(|value| ["SID", "STAR", "APP", "APPROACH", "ARRIVAL", "DEPARTURE", "TERMINAL", "AIRPORT", "APT"].iter().any(|excluded| value == *excluded || value.contains(excluded)));
     let airport = ["is_airport", "airport"]
         .iter()
         .filter_map(|key| fix.get(*key))

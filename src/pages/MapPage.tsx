@@ -27,7 +27,7 @@ const traffic = { type: "FeatureCollection" as const, features: [{ type: "Featur
 const weather = { type: "FeatureCollection" as const, features: [{ type: "Feature" as const, properties: {}, geometry: { type: "Polygon" as const, coordinates: [[[119.0, 34.3], [120.6, 34.3], [120.6, 35.4], [119.0, 35.4], [119.0, 34.3]]] } }] };
 const mapboxToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN?.trim();
 const mapProvider = mapboxToken ? "Mapbox · OpenStreetMap" : "OpenStreetMap contributors";
-const initialViewport: MapViewport = { west: 73, south: 18, east: 135, north: 54 };
+const initialViewport: MapViewport = { west: 73, south: 18, east: 135, north: 54, zoom: 4.5 };
 const baseMapStyle: StyleSpecification = {
   version: 8,
   sources: { base: mapboxToken ? { type: "raster", tiles: [`https://api.mapbox.com/styles/v1/mapbox/navigation-night-v1/tiles/512/{z}/{x}/{y}?access_token=${mapboxToken}`], tileSize: 512, attribution: "© Mapbox © OpenStreetMap" } : { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
@@ -69,7 +69,7 @@ export function MapPage() {
     const updateMeasurement = (points: Array<[number, number]>) => (instance.getSource("measurement") as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: points.length > 1 ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: points } }] : [] });
     const updateViewport = () => {
       const bounds = instance.getBounds();
-      setViewport({ west: Number(bounds.getWest().toFixed(3)), south: Number(bounds.getSouth().toFixed(3)), east: Number(bounds.getEast().toFixed(3)), north: Number(bounds.getNorth().toFixed(3)) });
+      setViewport({ west: Number(bounds.getWest().toFixed(3)), south: Number(bounds.getSouth().toFixed(3)), east: Number(bounds.getEast().toFixed(3)), north: Number(bounds.getNorth().toFixed(3)), zoom: Number(instance.getZoom().toFixed(1)) });
     };
     instance.on("load", () => {
       instance.addSource("navigation-airways", { type: "geojson", data: emptyFeatures() }); instance.addSource("navigation-airports", { type: "geojson", data: pointsAsFeatures(fallbackMapData.airports) }); instance.addSource("navigation-navaids", { type: "geojson", data: pointsAsFeatures(fallbackMapData.navaids) }); instance.addSource("simbrief-route", { type: "geojson", data: emptyFeatures() }); instance.addSource("simbrief-points", { type: "geojson", data: emptyFeatures() }); instance.addSource("airspace", { type: "geojson", data: airspace }); instance.addSource("traffic", { type: "geojson", data: traffic }); instance.addSource("weather", { type: "geojson", data: weather }); instance.addSource("measurement", { type: "geojson", data: emptyFeatures() });

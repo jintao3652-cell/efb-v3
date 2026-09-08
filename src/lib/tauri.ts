@@ -46,6 +46,7 @@ export interface MapViewport {
   south: number;
   east: number;
   north: number;
+  zoom: number;
 }
 
 export interface ChartFoxChart {
@@ -179,5 +180,5 @@ export async function getNavigationAirportDetails(icao: string): Promise<Navigat
 
 export async function getNavigationMapData(viewport: MapViewport): Promise<NavigationMapData> {
   if (!isTauri()) return { airports: [], navaids: [], airways: [] };
-  return invoke<NavigationMapData>("get_navigation_map_data", { west: viewport.west, south: viewport.south, east: viewport.east, north: viewport.north });
+  return invoke<NavigationMapData>("get_navigation_map_data", { west: viewport.west, south: viewport.south, east: viewport.east, north: viewport.north, zoom: viewport.zoom });
 }
