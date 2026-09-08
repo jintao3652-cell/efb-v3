@@ -45,6 +45,14 @@ npm run tauri build -- --target x86_64-pc-windows-msvc
 
 应用演示数据不提供真实航图或商业 AIRAC 数据。接入 Navigraph、机场 AIP 或任何第三方数据前，必须使用具有相应分发和缓存许可的账户/API。飞行前请以官方 AIP、NOTAM 和气象信息为准。
 
+### OpenWeather（可选）
+
+配置环境变量 `OPENWEATHER_API_KEY` 后，天气页会优先获取 OpenWeather 的地面天气数据；未配置时回退至 Aviation Weather Center 的 METAR 查询。OpenWeather 数据只作补充态势参考，不能替代官方航空气象资料。地图底图数据来自 OpenStreetMap contributors。
+
+### Navigraph AIRAC 周期
+
+设置页通过 `https://fmsdata.api.navigraph.com/v3/cycles` 查询当前 AIRAC 周期，仅用于检测周期变化；下载、解析或分发 Navigraph 导航数据仍需有效的 Navigraph 授权。
+
 ## 后续开发
 
 1. 添加受授权的 AIRAC 导入器及航图 PDF 下载缓存。
