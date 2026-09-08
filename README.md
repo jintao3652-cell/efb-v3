@@ -49,6 +49,8 @@ npm run tauri build -- --target x86_64-pc-windows-msvc
 
 天气页优先使用中国气象局航空气象的 `http://avimet.nmc.cn/hangkong/METAR/{ICAO}.json` 和 `http://avimet.nmc.cn/hangkong/TAF/{ICAO}.json`。服务不可用时，配置 `OPENWEATHER_API_KEY` 后会回退至 OpenWeather，否则使用 Aviation Weather Center 的 METAR 查询。所有数据只作补充态势参考，不能替代官方航空气象资料。地图底图数据来自 OpenStreetMap contributors。
 
+如需在航图地图启用 OpenWeather 降水雷达，请在项目根目录 `.env` 中设置 `VITE_OPENWEATHER_API_KEY=你的_API_Key`。地图使用 `precipitation_new` 瓦片；未配置时，天气雷达开关会显示配置提示。
+
 非 `Z` 开头的 ICAO 机场直接请求 Aviation Weather Center 的 METAR（`hours=0`）和 TAF，并在天气页提供 `metar-taf.com` 的机场预览入口。
 
 ### Navigraph AIRAC 周期
