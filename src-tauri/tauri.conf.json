@@ -20,7 +20,10 @@
       "resizable": true,
       "decorations": true
     }],
-    "security": { "csp": null }
+    "security": {
+      "csp": null,
+      "assetProtocol": { "enable": true, "scope": ["$APPLOCALDATA/**"] }
+    }
   },
   "bundle": {
     "icon": ["icons/app_icon.ico"],

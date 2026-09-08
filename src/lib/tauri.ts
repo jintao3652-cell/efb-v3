@@ -22,3 +22,8 @@ export async function clearCache(): Promise<void> {
   if (!isTauri()) return;
   await invoke("clear_chart_cache");
 }
+
+export async function cacheChartPdf(sourcePath: string, chartId: string): Promise<string> {
+  if (!isTauri()) throw new Error("航图缓存仅在桌面应用中可用");
+  return invoke<string>("cache_chart_pdf", { sourcePath, chartId });
+}

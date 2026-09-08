@@ -17,3 +17,21 @@ pub fn clear_chart_cache() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub fn cache_chart_pdf(source_path: String, chart_id: String) -> Result<String, String> {
+    let source = PathBuf::from(source_path);
+    if source.extension().and_then(|extension| extension.to_str()).map(|extension| extension.eq_ignore_ascii_case("pdf")) != Some(true) {
+        return Err("请选择 PDF 航图文件".to_string());
+    }
+    if !source.is_file() {
+        return Err("找不到所选航图文件".to_string());
+    }
+    let safe_id: String = chart_id.chars().filter(|character| character.is_ascii_alphanumeric() || *character == '-' || *character == '_').collect();
+    if safe_id.is_empty() {
+        return Err("无效的航图标识".to_string());
+    }
+    let target = cache_directory()?.join(format!("{safe_id}.pdf"));
+    fs::copy(source, &target).map_err(|error| error.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
