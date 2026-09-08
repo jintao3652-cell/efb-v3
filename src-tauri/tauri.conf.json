@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SkyBoard EFB",
+  "version": "0.1.0",
+  "identifier": "com.skyboard.efb",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    
+    "windows": [{
+      "title": "SkyBoard EFB",
+      "width": 1440,
+      "height": 900,
+      "minWidth": 1100,
+      "minHeight": 700,
+      "resizable": true,
+      "decorations": true
+    }],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "icon": ["icons/app_icon.ico"],
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "windows": { "wix": { "language": "zh-CN" }, "nsis": { "displayLanguageSelector": true } }
+  }
+}
