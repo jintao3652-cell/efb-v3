@@ -26,6 +26,29 @@ export interface ChartFoxChart {
   url: string;
 }
 
+export interface NavigationDatabaseStatus {
+  source: "lnm" | "fenix";
+  databasePath?: string;
+  ready: boolean;
+  airacCycle?: string;
+  message: string;
+}
+
+export interface NavigationAirport {
+  icao: string;
+  iata: string;
+  name: string;
+  city: string;
+  elevation: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface NavigationAirportDetails {
+  runways: string[];
+  frequencies: Array<{ name: string; value: string }>;
+}
+
 export const isTauri = () => "__TAURI_INTERNALS__" in window;
 
 export async function listFlightPlans(): Promise<FlightPlan[]> {
@@ -66,4 +89,24 @@ export async function importSimBriefFlight(username: string): Promise<SimBriefFl
 export async function listChartFoxCharts(icao: string): Promise<ChartFoxChart[]> {
   if (!isTauri()) throw new Error("ChartFox 查询仅在桌面应用中可用");
   return invoke<ChartFoxChart[]>("list_chartfox_charts", { icao });
+}
+
+export async function getNavigationDatabaseStatus(): Promise<NavigationDatabaseStatus> {
+  if (!isTauri()) throw new Error("导航数据库仅在桌面应用中可用");
+  return invoke<NavigationDatabaseStatus>("get_navigation_database_status");
+}
+
+export async function setNavigationDatabase(source: "lnm" | "fenix", databasePath?: string): Promise<NavigationDatabaseStatus> {
+  if (!isTauri()) throw new Error("导航数据库仅在桌面应用中可用");
+  return invoke<NavigationDatabaseStatus>("set_navigation_database", { source, databasePath });
+}
+
+export async function searchNavigationAirports(query: string): Promise<NavigationAirport[]> {
+  if (!isTauri()) return [];
+  return invoke<NavigationAirport[]>("search_navigation_airports", { query });
+}
+
+export async function getNavigationAirportDetails(icao: string): Promise<NavigationAirportDetails> {
+  if (!isTauri()) return { runways: [], frequencies: [] };
+  return invoke<NavigationAirportDetails>("get_navigation_airport_details", { icao });
 }
