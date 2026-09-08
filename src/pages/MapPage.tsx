@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
 import { Crosshair, Layers, MapPin, Minus, Plane, Plus, RotateCcw, Ruler, X } from "lucide-react";
 import { airports } from "../lib/data";
 
@@ -20,6 +20,15 @@ const navaids = { type: "FeatureCollection" as const, features: [{ type: "Featur
 const airspace = { type: "FeatureCollection" as const, features: [{ type: "Feature" as const, properties: {}, geometry: { type: "Polygon" as const, coordinates: [[[115.2, 40.5], [118.4, 40.5], [118.4, 37.9], [115.2, 37.9], [115.2, 40.5]]] } }] };
 const traffic = { type: "FeatureCollection" as const, features: [{ type: "Feature" as const, properties: { callsign: "CSN6981" }, geometry: { type: "Point" as const, coordinates: [118.2, 37.5] } }] };
 const weather = { type: "FeatureCollection" as const, features: [{ type: "Feature" as const, properties: {}, geometry: { type: "Polygon" as const, coordinates: [[[119.0, 34.3], [120.6, 34.3], [120.6, 35.4], [119.0, 35.4], [119.0, 34.3]]] } }] };
+const mapboxToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN?.trim();
+const mapProvider = mapboxToken ? "Mapbox · OpenStreetMap" : "OpenStreetMap contributors";
+const baseMapStyle: StyleSpecification = {
+  version: 8,
+  sources: {
+    base: mapboxToken ? { type: "raster", tiles: [`https://api.mapbox.com/styles/v1/mapbox/navigation-night-v1/tiles/512/{z}/{x}/{y}?access_token=${mapboxToken}`], tileSize: 512, attribution: "© Mapbox © OpenStreetMap" } : { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" },
+  },
+  layers: [{ id: "base", type: "raster", source: "base" }],
+};
 
 function distanceInNm(points: Array<[number, number]>) {
   const radians = (value: number) => value * Math.PI / 180;
@@ -39,7 +48,7 @@ export function MapPage() {
 
   useEffect(() => {
     if (!container.current || map.current) return;
-    const instance = new maplibregl.Map({ container: container.current, center: [114.8, 34.5], zoom: 4.5, style: { version: 8, sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } }, layers: [{ id: "base", type: "raster", source: "osm" }] } });
+    const instance = new maplibregl.Map({ container: container.current, center: [114.8, 34.5], zoom: 4.5, style: baseMapStyle });
     const updateMeasurement = (points: Array<[number, number]>) => (instance.getSource("measurement") as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: points.length > 1 ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: points } }] : [] });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: flightRoute }); instance.addSource("waypoints", { type: "geojson", data: routeWaypoints }); instance.addSource("airports", { type: "geojson", data: { type: "FeatureCollection", features: airports.map((airport) => ({ type: "Feature" as const, properties: { icao: airport.icao }, geometry: { type: "Point" as const, coordinates: [airport.longitude, airport.latitude] } })) } }); instance.addSource("navaids", { type: "geojson", data: navaids }); instance.addSource("airspace", { type: "geojson", data: airspace }); instance.addSource("traffic", { type: "geojson", data: traffic }); instance.addSource("weather", { type: "geojson", data: weather }); instance.addSource("measurement", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -59,6 +68,6 @@ export function MapPage() {
   return <div className="map-page"><div className="map-canvas" ref={container} />
     <div className="map-toolbar"><button onClick={() => zoom(1)} aria-label="放大"><Plus size={19} /></button><button onClick={() => zoom(-1)} aria-label="缩小"><Minus size={19} /></button><span /><button onClick={() => map.current?.flyTo({ center: [118.2, 37.5], zoom: 6.4 })} aria-label="定位到计划航路"><Crosshair size={19} /></button><button className={measureMode ? "active" : ""} onClick={toggleMeasurement} aria-label="测量距离"><Ruler size={19} /></button></div>
     <aside className="map-layers"><div className="map-layers-heading"><div><Layers size={18} /><strong>地图图层</strong></div><button onClick={() => setLayersOpen((open) => !open)} aria-label="折叠图层"><X className={layersOpen ? "" : "map-panel-closed"} size={17} /></button></div>{layersOpen && <><div className="layer-list">{layerOptions.map(({ key, label }) => <label className="layer-toggle" key={key}><span>{label}</span><input type="checkbox" checked={layers[key]} onChange={() => setLayers((current) => ({ ...current, [key]: !current[key] }))} /><i /></label>)}</div><p>航空要素使用内置演示数据；基础底图需要网络。</p></>}</aside>
-    <div className="map-status-card"><div><Plane size={17} /><strong>CSN6981</strong><span>FL340 · GS 442 kt</span></div><p><MapPin size={14} />计划航路 ZBAA → ZSPD</p></div>{measureMode && <div className="measure-card"><div><Ruler size={16} /><strong>距离测量</strong></div><span>{measureDistance.toFixed(1)} NM</span><button onClick={resetMeasurement}><RotateCcw size={14} />清除</button></div>}<div className="map-legend"><i />计划航路 <span />机场</div><div className="map-attribution">地图数据 © OpenStreetMap contributors</div>
+    <div className="map-status-card"><div><Plane size={17} /><strong>CSN6981</strong><span>FL340 · GS 442 kt</span></div><p><MapPin size={14} />计划航路 ZBAA → ZSPD</p></div>{measureMode && <div className="measure-card"><div><Ruler size={16} /><strong>距离测量</strong></div><span>{measureDistance.toFixed(1)} NM</span><button onClick={resetMeasurement}><RotateCcw size={14} />清除</button></div>}<div className="map-legend"><i />计划航路 <span />机场</div><div className="map-attribution">地图数据 © {mapProvider}</div>
   </div>;
 }

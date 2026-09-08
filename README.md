@@ -53,6 +53,10 @@ npm run tauri build -- --target x86_64-pc-windows-msvc
 
 设置页通过 `https://fmsdata.api.navigraph.com/v3/cycles` 查询当前 AIRAC 周期，仅用于检测周期变化；下载、解析或分发 Navigraph 导航数据仍需有效的 Navigraph 授权。
 
+### Mapbox 与 SimBrief
+
+将公开 Mapbox 访问令牌写入 `.env` 中的 `VITE_MAPBOX_ACCESS_TOKEN` 后，MapLibre 将优先使用 Mapbox 栅格图源；未配置时自动使用 OpenStreetMap。飞行计划页支持输入 SimBrief 用户名，并通过 `https://www.simbrief.com/api/xml.fetcher.php?username={username}&json=1` 导入最近一次 OFP。请只使用你有权访问的 SimBrief 用户数据，并在导入后核对全部飞行信息。
+
 ## 后续开发
 
 1. 添加受授权的 AIRAC 导入器及航图 PDF 下载缓存。
