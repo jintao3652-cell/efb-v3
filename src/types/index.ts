@@ -1,5 +1,12 @@
 export type FlightPlanStatus = "草稿" | "计划中" | "已完成";
 
+export interface FlightRoutePoint {
+  ident: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
 export interface FlightPlan {
   id: string;
   callsign: string;
@@ -13,6 +20,7 @@ export interface FlightPlan {
   status: FlightPlanStatus;
   updatedAt: string;
   importedAt: string;
+  routePoints: FlightRoutePoint[];
 }
 
 export interface Airport {

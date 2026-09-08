@@ -36,6 +36,7 @@ export const demoPlan: FlightPlan = {
   id: "demo-zbaa-zspd", callsign: "CSN 6981", departure: "ZBAA", arrival: "ZSPD", alternate: "ZSHC",
   route: "RENOB W36 POU W47 DUMET A593 PUD", aircraft: "A320neo", cruiseAltitude: "FL340",
   etd: "2026-09-08T12:30", status: "计划中", updatedAt: "2026-09-08T12:00:00.000Z", importedAt: "2026-09-08T12:00:00.000Z",
+  routePoints: [],
 };
 
 export const cachedWeather: WeatherReport = {

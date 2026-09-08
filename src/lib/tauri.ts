@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { FlightPlan, WeatherReport } from "../types";
+import type { FlightPlan, FlightRoutePoint, WeatherReport } from "../types";
 
 export interface AiracCycle {
   cycleId: string;
@@ -17,6 +17,35 @@ export interface SimBriefFlight {
   aircraft: string;
   cruiseAltitude: string;
   scheduledOut: string;
+  routePoints: FlightRoutePoint[];
+}
+
+export interface NavigationMapPoint {
+  ident: string;
+  name: string;
+  icao: string;
+  iata: string;
+  kind: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface NavigationAirway {
+  name: string;
+  coordinates: Array<[number, number]>;
+}
+
+export interface NavigationMapData {
+  airports: NavigationMapPoint[];
+  navaids: NavigationMapPoint[];
+  airways: NavigationAirway[];
+}
+
+export interface MapViewport {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
 }
 
 export interface ChartFoxChart {
@@ -109,4 +138,9 @@ export async function searchNavigationAirports(query: string): Promise<Navigatio
 export async function getNavigationAirportDetails(icao: string): Promise<NavigationAirportDetails> {
   if (!isTauri()) return { runways: [], frequencies: [] };
   return invoke<NavigationAirportDetails>("get_navigation_airport_details", { icao });
+}
+
+export async function getNavigationMapData(viewport: MapViewport): Promise<NavigationMapData> {
+  if (!isTauri()) return { airports: [], navaids: [], airways: [] };
+  return invoke<NavigationMapData>("get_navigation_map_data", { west: viewport.west, south: viewport.south, east: viewport.east, north: viewport.north });
 }

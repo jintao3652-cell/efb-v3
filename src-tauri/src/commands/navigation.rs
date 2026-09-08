@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, fs, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -50,6 +50,33 @@ pub struct NavigationFrequency {
 pub struct NavigationAirportDetails {
     pub runways: Vec<String>,
     pub frequencies: Vec<NavigationFrequency>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationMapPoint {
+    pub ident: String,
+    pub name: String,
+    pub icao: String,
+    pub iata: String,
+    pub kind: String,
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationAirway {
+    pub name: String,
+    pub coordinates: Vec<[f64; 2]>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationMapData {
+    pub airports: Vec<NavigationMapPoint>,
+    pub navaids: Vec<NavigationMapPoint>,
+    pub airways: Vec<NavigationAirway>,
 }
 
 fn app_directory() -> Result<PathBuf, String> {
@@ -272,4 +299,110 @@ pub fn search_navigation_airports(query: String) -> Result<Vec<NavigationAirport
 pub fn get_navigation_airport_details(icao: String) -> Result<NavigationAirportDetails, String> {
     let (source, connection) = selected_connection()?;
     airport_details(&connection, &source, &icao)
+}
+
+fn qualified_text_expression(alias: &str, column: Option<String>) -> String {
+    column.map(|name| format!("COALESCE(CAST({}.{} AS TEXT), '')", alias, quote_identifier(&name))).unwrap_or_else(|| "''".to_string())
+}
+
+fn qualified_number_expression(alias: &str, column: Option<String>) -> String {
+    column.map(|name| format!("COALESCE(CAST({}.{} AS REAL), 0)", alias, quote_identifier(&name))).unwrap_or_else(|| "0".to_string())
+}
+
+fn map_points_from_table(
+    connection: &Connection,
+    table: &str,
+    ident_candidates: &[&str],
+    name_candidates: &[&str],
+    latitude_candidates: &[&str],
+    longitude_candidates: &[&str],
+    kind: &str,
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+) -> Result<Vec<NavigationMapPoint>, String> {
+    if !table_exists(connection, table)? { return Ok(Vec::new()); }
+    let columns = table_columns(connection, table)?;
+    let latitude = match find_column(&columns, latitude_candidates) { Some(column) => number_expression(Some(column)), None => return Ok(Vec::new()) };
+    let longitude = match find_column(&columns, longitude_candidates) { Some(column) => number_expression(Some(column)), None => return Ok(Vec::new()) };
+    let ident = text_expression(find_column(&columns, ident_candidates));
+    let name = text_expression(find_column(&columns, name_candidates));
+    let sql = format!("SELECT {ident}, {name}, {latitude}, {longitude} FROM {} WHERE {latitude} BETWEEN ?1 AND ?2 AND {longitude} BETWEEN ?3 AND ?4 LIMIT 1500", quote_identifier(table));
+    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+    let rows = statement.query_map(params![south, north, west, east], |row| Ok(NavigationMapPoint {
+        ident: row.get(0)?, name: row.get(1)?, icao: String::new(), iata: String::new(), kind: kind.to_string(), latitude: row.get(2)?, longitude: row.get(3)?,
+    })).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn map_airports(connection: &Connection, source: &NavigationSource, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationMapPoint>, String> {
+    let table = airport_table(source);
+    let columns = table_columns(connection, table)?;
+    let (icao_candidates, iata_candidates, name_candidates, _, _, latitude_candidates, longitude_candidates) = airport_columns(source);
+    let latitude = match find_column(&columns, latitude_candidates) { Some(column) => number_expression(Some(column)), None => return Ok(Vec::new()) };
+    let longitude = match find_column(&columns, longitude_candidates) { Some(column) => number_expression(Some(column)), None => return Ok(Vec::new()) };
+    let icao = text_expression(find_column(&columns, icao_candidates));
+    let iata = text_expression(find_column(&columns, iata_candidates));
+    let name = text_expression(find_column(&columns, name_candidates));
+    let sql = format!("SELECT {icao}, {iata}, {name}, {latitude}, {longitude} FROM {} WHERE {latitude} BETWEEN ?1 AND ?2 AND {longitude} BETWEEN ?3 AND ?4 LIMIT 1200", quote_identifier(table));
+    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+    let rows = statement.query_map(params![south, north, west, east], |row| Ok(NavigationMapPoint {
+        ident: row.get(0)?, icao: row.get(0)?, iata: row.get(1)?, name: row.get(2)?, kind: "机场".to_string(), latitude: row.get(3)?, longitude: row.get(4)?,
+    })).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn map_navaids(connection: &Connection, source: &NavigationSource, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationMapPoint>, String> {
+    let (tables, latitude_candidates, longitude_candidates): (&[(&str, &str)], &[&str], &[&str]) = match source {
+        NavigationSource::Lnm => (&[("waypoint", "航路点"), ("vor", "VOR"), ("ndb", "NDB")], &["laty", "latitude", "lat"], &["lonx", "longitude", "lon"]),
+        NavigationSource::Fenix => (&[("Waypoints", "航路点"), ("Navaids", "导航台")], &["latitude", "lat", "laty", "latitude_degrees"], &["longitude", "lon", "lonx", "longitude_degrees"]),
+    };
+    let mut points = Vec::new();
+    for (table, kind) in tables {
+        points.extend(map_points_from_table(connection, table, &["ident", "identifier", "code", "name"], &["name", "description", "ident", "identifier"], latitude_candidates, longitude_candidates, kind, west, south, east, north)?);
+    }
+    let mut seen = HashSet::new();
+    points.retain(|point| seen.insert(format!("{}:{}:{:.4}:{:.4}", point.kind, point.ident, point.latitude, point.longitude)));
+    Ok(points)
+}
+
+fn map_airways(connection: &Connection, source: &NavigationSource, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationAirway>, String> {
+    let (leg_table, waypoint_table) = match source { NavigationSource::Lnm => ("airway", "waypoint"), NavigationSource::Fenix => ("AirwayLegs", "Waypoints") };
+    if !table_exists(connection, leg_table)? || !table_exists(connection, waypoint_table)? { return Ok(Vec::new()); }
+    let leg_columns = table_columns(connection, leg_table)?;
+    let waypoint_columns = table_columns(connection, waypoint_table)?;
+    let from_leg = match find_column(&leg_columns, &["from_waypoint_id", "fromwaypointid", "from_waypointid", "from_fix_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
+    let to_leg = match find_column(&leg_columns, &["to_waypoint_id", "towaypointid", "to_waypointid", "to_fix_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
+    let waypoint_id = match find_column(&waypoint_columns, &["waypoint_id", "waypointid", "id", "waypoint_key"]) { Some(column) => column, None => return Ok(Vec::new()) };
+    let latitude_candidates = if matches!(source, NavigationSource::Lnm) { &["laty", "latitude", "lat"][..] } else { &["latitude", "lat", "laty", "latitude_degrees"][..] };
+    let longitude_candidates = if matches!(source, NavigationSource::Lnm) { &["lonx", "longitude", "lon"][..] } else { &["longitude", "lon", "lonx", "longitude_degrees"][..] };
+    let from_latitude = match find_column(&waypoint_columns, latitude_candidates) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
+    let from_longitude = match find_column(&waypoint_columns, longitude_candidates) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
+    let to_latitude = match find_column(&waypoint_columns, latitude_candidates) { Some(column) => qualified_number_expression("to_point", Some(column)), None => return Ok(Vec::new()) };
+    let to_longitude = match find_column(&waypoint_columns, longitude_candidates) { Some(column) => qualified_number_expression("to_point", Some(column)), None => return Ok(Vec::new()) };
+    let name = qualified_text_expression("leg", find_column(&leg_columns, &["name", "airway_name", "ident", "route_name"]));
+    let sql = format!(
+        "SELECT {name}, {from_longitude}, {from_latitude}, {to_longitude}, {to_latitude} FROM {} AS leg JOIN {} AS from_point ON leg.{} = from_point.{} JOIN {} AS to_point ON leg.{} = to_point.{} WHERE MAX({from_latitude}, {to_latitude}) >= ?1 AND MIN({from_latitude}, {to_latitude}) <= ?2 AND MAX({from_longitude}, {to_longitude}) >= ?3 AND MIN({from_longitude}, {to_longitude}) <= ?4 LIMIT 2500",
+        quote_identifier(leg_table), quote_identifier(waypoint_table), quote_identifier(&from_leg), quote_identifier(&waypoint_id), quote_identifier(waypoint_table), quote_identifier(&to_leg), quote_identifier(&waypoint_id)
+    );
+    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+    let rows = statement.query_map(params![south, north, west, east], |row| Ok(NavigationAirway {
+        name: { let name: String = row.get(0)?; if name.is_empty() { "航路".to_string() } else { name } },
+        coordinates: vec![[row.get(1)?, row.get(2)?], [row.get(3)?, row.get(4)?]],
+    })).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn get_navigation_map_data(west: f64, south: f64, east: f64, north: f64) -> Result<NavigationMapData, String> {
+    if !(-180.0..=180.0).contains(&west) || !(-180.0..=180.0).contains(&east) || !(-90.0..=90.0).contains(&south) || !(-90.0..=90.0).contains(&north) || west >= east || south >= north {
+        return Err("地图可视范围无效".to_string());
+    }
+    let (source, connection) = selected_connection()?;
+    Ok(NavigationMapData {
+        airports: map_airports(&connection, &source, west, south, east, north)?,
+        navaids: map_navaids(&connection, &source, west, south, east, north)?,
+        airways: map_airways(&connection, &source, west, south, east, north)?,
+    })
 }
