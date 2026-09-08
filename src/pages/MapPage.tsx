@@ -12,7 +12,7 @@ const layerOptions: Array<{ key: LayerKey; label: string }> = [
   { key: "traffic", label: "实时交通（演示）" }, { key: "weather", label: "天气雷达（演示）" },
 ];
 const mapLayerIds: Record<LayerKey, string[]> = {
-  route: ["navigation-airways", "navigation-waypoints", "navigation-navaids", "navigation-waypoint-labels", "navigation-navaid-labels", "simbrief-route-casing", "simbrief-route", "simbrief-route-points", "simbrief-route-labels"],
+  route: ["navigation-airways", "navigation-waypoints", "navigation-navaids", "navigation-waypoint-labels", "navigation-navaid-labels"],
   airports: ["navigation-airports", "navigation-airport-labels"], airspace: ["airspace-fill", "airspace-line"], traffic: ["traffic-points"], weather: ["weather-fill", "weather-line"],
 };
 const fallbackAirports: NavigationMapPoint[] = airports.map((airport) => ({ ident: airport.icao, icao: airport.icao, iata: airport.iata, name: airport.name, kind: "机场", latitude: airport.latitude, longitude: airport.longitude }));

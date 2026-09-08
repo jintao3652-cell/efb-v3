@@ -49,18 +49,24 @@ fn coordinate(value: Option<&Value>, latitude: bool) -> Option<f64> {
     (result <= limit).then_some(if negative { -result } else { result })
 }
 
-fn is_terminal_fix(fix: &serde_json::Map<String, Value>) -> bool {
+fn is_non_enroute_fix(fix: &serde_json::Map<String, Value>) -> bool {
     let terminal = ["is_sid_star", "is_terminal", "terminal"]
         .iter()
         .filter_map(|key| fix.get(*key))
         .map(|value| value_text(Some(value)).to_uppercase())
         .any(|value| matches!(value.as_str(), "1" | "TRUE" | "YES" | "SID" | "STAR" | "APPROACH"));
-    let phase = ["phase", "type", "fix_type", "procedure_type"]
+    let phase = ["stage", "phase", "type", "fix_type", "procedure_type"]
         .iter()
         .filter_map(|key| fix.get(*key))
         .map(|value| value_text(Some(value)).to_uppercase())
-        .any(|value| value.contains("SID") || value.contains("STAR") || value.contains("APPROACH"));
-    terminal || phase
+        .any(|value| ["SID", "STAR", "APP", "APPROACH", "ARRIVAL", "DEPARTURE", "CLB", "DES", "CLIMB", "DESCENT", "TERMINAL", "AIRPORT", "APT"].iter().any(|excluded| value == *excluded || value.contains(excluded)));
+    let airport = ["is_airport", "airport"]
+        .iter()
+        .filter_map(|key| fix.get(*key))
+        .map(|value| value_text(Some(value)).to_uppercase())
+        .any(|value| matches!(value.as_str(), "1" | "TRUE" | "YES"));
+    let ident = ["ident", "fix", "name", "id"].iter().map(|key| value_text(fix.get(*key)).to_uppercase()).find(|value| !value.is_empty()).unwrap_or_default();
+    terminal || phase || airport || matches!(ident.as_str(), "TOC" | "TOD")
 }
 
 fn simbrief_route_points(payload: &Value) -> Vec<FlightRoutePoint> {
@@ -68,7 +74,7 @@ fn simbrief_route_points(payload: &Value) -> Vec<FlightRoutePoint> {
     let Some(fixes) = fixes else { return Vec::new(); };
     let mut points = Vec::new();
     for fix in fixes.iter().filter_map(Value::as_object) {
-        if is_terminal_fix(fix) { continue; }
+        if is_non_enroute_fix(fix) { continue; }
         let latitude = coordinate(fix.get("pos_lat").or_else(|| fix.get("latitude")).or_else(|| fix.get("lat")), true);
         let longitude = coordinate(fix.get("pos_long").or_else(|| fix.get("longitude")).or_else(|| fix.get("lon")), false);
         let (Some(latitude), Some(longitude)) = (latitude, longitude) else { continue; };
