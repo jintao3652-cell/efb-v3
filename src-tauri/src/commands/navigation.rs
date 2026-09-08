@@ -165,7 +165,7 @@ fn airport_columns(source: &NavigationSource) -> AirportColumnCandidates {
         ),
         NavigationSource::Fenix => (
             &["icao", "icao_code", "ident", "identifier", "code"], &["iata", "iata_code"], &["name", "airport_name"], &["city", "town", "municipality"],
-            &["elevation", "altitude", "elevation_feet"], &["latitude", "lat", "laty", "latitude_degrees"], &["longitude", "lon", "lonx", "longitude_degrees"],
+            &["elevation", "altitude", "elevation_feet"], &["latitude", "lat", "laty", "latitude_degrees"], &["longtitude", "longitude", "lon", "lonx", "longitude_degrees"],
         ),
     }
 }
@@ -301,14 +301,6 @@ pub fn get_navigation_airport_details(icao: String) -> Result<NavigationAirportD
     airport_details(&connection, &source, &icao)
 }
 
-fn qualified_text_expression(alias: &str, column: Option<String>) -> String {
-    column.map(|name| format!("COALESCE(CAST({}.{} AS TEXT), '')", alias, quote_identifier(&name))).unwrap_or_else(|| "''".to_string())
-}
-
-fn qualified_number_expression(alias: &str, column: Option<String>) -> String {
-    column.map(|name| format!("COALESCE(CAST({}.{} AS REAL), 0)", alias, quote_identifier(&name))).unwrap_or_else(|| "0".to_string())
-}
-
 fn map_points_from_table(
     connection: &Connection,
     table: &str,
@@ -356,7 +348,7 @@ fn map_airports(connection: &Connection, source: &NavigationSource, west: f64, s
 fn map_navaids(connection: &Connection, source: &NavigationSource, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationMapPoint>, String> {
     let (tables, latitude_candidates, longitude_candidates): (&[(&str, &str)], &[&str], &[&str]) = match source {
         NavigationSource::Lnm => (&[("waypoint", "航路点"), ("vor", "VOR"), ("ndb", "NDB")], &["laty", "latitude", "lat"], &["lonx", "longitude", "lon"]),
-        NavigationSource::Fenix => (&[("Waypoints", "航路点"), ("Navaids", "导航台")], &["latitude", "lat", "laty", "latitude_degrees"], &["longitude", "lon", "lonx", "longitude_degrees"]),
+        NavigationSource::Fenix => (&[("Waypoints", "航路点"), ("Navaids", "导航台")], &["latitude", "lat", "laty", "latitude_degrees"], &["longtitude", "longitude", "lon", "lonx", "longitude_degrees"]),
     };
     let mut points = Vec::new();
     for (table, kind) in tables {
@@ -367,59 +359,79 @@ fn map_navaids(connection: &Connection, source: &NavigationSource, west: f64, so
     Ok(points)
 }
 
-fn collect_airway_segments(connection: &Connection, sql: String, west: f64, south: f64, east: f64, north: f64) -> Result<Vec<NavigationAirway>, String> {
-    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
-    let rows = statement.query_map(params![south, north, west, east], |row| Ok(NavigationAirway {
-        name: { let name: String = row.get(0)?; if name.is_empty() { "航路".to_string() } else { name } },
-        coordinates: vec![[row.get(1)?, row.get(2)?], [row.get(3)?, row.get(4)?]],
-    })).map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+#[derive(Debug, Clone)]
+struct AirwaySegment {
+    group: String,
+    name: String,
+    sequence: i64,
+    is_start: bool,
+    from_id: i64,
+    to_id: i64,
+    from: [f64; 2],
+    to: [f64; 2],
+}
+
+fn navigation_airway(name: String, segments: &[AirwaySegment]) -> NavigationAirway {
+    let mut coordinates = vec![segments[0].from];
+    for segment in segments { coordinates.push(segment.to); }
+    NavigationAirway { name, coordinates }
+}
+
+fn merge_lnm_airways(mut segments: Vec<AirwaySegment>) -> Vec<NavigationAirway> {
+    segments.sort_by(|first, second| first.group.cmp(&second.group).then(first.sequence.cmp(&second.sequence)));
+    let mut airways = Vec::new();
+    let mut chain: Vec<AirwaySegment> = Vec::new();
+    for segment in segments {
+        let continues = chain.last().is_some_and(|previous| previous.group == segment.group && previous.to_id == segment.from_id);
+        if !chain.is_empty() && !continues {
+            airways.push(navigation_airway(chain[0].name.clone(), &chain));
+            chain.clear();
+        }
+        chain.push(segment);
+    }
+    if !chain.is_empty() { airways.push(navigation_airway(chain[0].name.clone(), &chain)); }
+    airways
+}
+
+fn merge_fenix_airways(segments: Vec<AirwaySegment>) -> Vec<NavigationAirway> {
+    let mut groups: HashMap<String, Vec<AirwaySegment>> = HashMap::new();
+    for segment in segments { groups.entry(segment.group.clone()).or_default().push(segment); }
+    let mut airways = Vec::new();
+    for (_, mut remaining) in groups {
+        while !remaining.is_empty() {
+            let start = remaining.iter().position(|segment| segment.is_start).unwrap_or(0);
+            let mut chain = vec![remaining.remove(start)];
+            while let Some(index) = remaining.iter().position(|segment| segment.from_id == chain.last().expect("chain has a segment").to_id) { chain.push(remaining.remove(index)); }
+            while let Some(index) = remaining.iter().position(|segment| segment.to_id == chain.first().expect("chain has a segment").from_id) {
+                let mut segment = remaining.remove(index);
+                std::mem::swap(&mut segment.from_id, &mut segment.to_id);
+                std::mem::swap(&mut segment.from, &mut segment.to);
+                chain.insert(0, segment);
+            }
+            airways.push(navigation_airway(chain[0].name.clone(), &chain));
+        }
+    }
+    airways
 }
 
 fn map_lnm_airways(connection: &Connection, west: f64, south: f64, east: f64, north: f64, limit: usize) -> Result<Vec<NavigationAirway>, String> {
-    if !table_exists(connection, "airway")? || !table_exists(connection, "waypoint")? { return Ok(Vec::new()); }
-    let airway_columns = table_columns(connection, "airway")?;
-    let waypoint_columns = table_columns(connection, "waypoint")?;
-    let from_leg = match find_column(&airway_columns, &["from_waypoint_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
-    let to_leg = match find_column(&airway_columns, &["to_waypoint_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
-    let waypoint_id = match find_column(&waypoint_columns, &["waypoint_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
-    let from_latitude = match find_column(&waypoint_columns, &["laty"]) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
-    let from_longitude = match find_column(&waypoint_columns, &["lonx"]) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
-    let to_latitude = match find_column(&waypoint_columns, &["laty"]) { Some(column) => qualified_number_expression("to_point", Some(column)), None => return Ok(Vec::new()) };
-    let to_longitude = match find_column(&waypoint_columns, &["lonx"]) { Some(column) => qualified_number_expression("to_point", Some(column)), None => return Ok(Vec::new()) };
-    let name = qualified_text_expression("leg", find_column(&airway_columns, &["airway_name", "name", "ident"]));
-    let sql = format!(
-        "SELECT {name}, {from_longitude}, {from_latitude}, {to_longitude}, {to_latitude} FROM \"airway\" AS leg JOIN \"waypoint\" AS from_point ON leg.{} = from_point.{} JOIN \"waypoint\" AS to_point ON leg.{} = to_point.{} WHERE MAX({from_latitude}, {to_latitude}) >= ?1 AND MIN({from_latitude}, {to_latitude}) <= ?2 AND MAX({from_longitude}, {to_longitude}) >= ?3 AND MIN({from_longitude}, {to_longitude}) <= ?4 LIMIT {limit}",
-        quote_identifier(&from_leg), quote_identifier(&waypoint_id), quote_identifier(&to_leg), quote_identifier(&waypoint_id),
-    );
-    collect_airway_segments(connection, sql, west, south, east, north)
+    let sql = format!("SELECT airway_name, airway_type, route_type, direction, airway_fragment_no, sequence_no, from_waypoint_id, to_waypoint_id, from_lonx, from_laty, to_lonx, to_laty FROM airway WHERE right_lonx >= ?1 AND left_lonx <= ?2 AND top_laty >= ?3 AND bottom_laty <= ?4 ORDER BY airway_name, airway_type, route_type, direction, airway_fragment_no, sequence_no LIMIT {limit}");
+    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+    let rows = statement.query_map(params![west, east, south, north], |row| Ok(AirwaySegment {
+        name: row.get(0)?, group: format!("{}:{}:{}:{}:{}", row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?.unwrap_or_default(), row.get::<_, Option<String>>(3)?.unwrap_or_default(), row.get::<_, i64>(4)?), sequence: row.get(5)?, from_id: row.get(6)?, to_id: row.get(7)?, from: [row.get(8)?, row.get(9)?], to: [row.get(10)?, row.get(11)?], is_start: false,
+    })).map_err(|error| error.to_string())?;
+    let segments = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(merge_lnm_airways(segments))
 }
 
 fn map_fenix_airways(connection: &Connection, west: f64, south: f64, east: f64, north: f64, limit: usize) -> Result<Vec<NavigationAirway>, String> {
-    if !table_exists(connection, "AirwayLegs")? || !table_exists(connection, "Waypoints")? { return Ok(Vec::new()); }
-    let leg_columns = table_columns(connection, "AirwayLegs")?;
-    let waypoint_columns = table_columns(connection, "Waypoints")?;
-    let from_leg = match find_column(&leg_columns, &["fromwaypointid", "from_waypoint_id", "fromwaypoint", "from_waypoint", "from_fix_id", "fromfixid"]) { Some(column) => column, None => return Ok(Vec::new()) };
-    let to_leg = match find_column(&leg_columns, &["towaypointid", "to_waypoint_id", "towaypoint", "to_waypoint", "to_fix_id", "tofixid"]) { Some(column) => column, None => return Ok(Vec::new()) };
-    let waypoint_id = match find_column(&waypoint_columns, &["id", "waypointid", "waypoint_id"]) { Some(column) => column, None => return Ok(Vec::new()) };
-    let from_latitude = match find_column(&waypoint_columns, &["latitude", "lat", "laty", "latitude_degrees"]) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
-    let from_longitude = match find_column(&waypoint_columns, &["longitude", "lon", "lonx", "longitude_degrees"]) { Some(column) => qualified_number_expression("from_point", Some(column)), None => return Ok(Vec::new()) };
-    let to_latitude = match find_column(&waypoint_columns, &["latitude", "lat", "laty", "latitude_degrees"]) { Some(column) => qualified_number_expression("to_point", Some(column)), None => return Ok(Vec::new()) };
-    let to_longitude = match find_column(&waypoint_columns, &["longitude", "lon", "lonx", "longitude_degrees"]) { Some(column) => qualified_number_expression("to_point", Some(column)), None => return Ok(Vec::new()) };
-    let mut joins = String::new();
-    let mut name = qualified_text_expression("leg", find_column(&leg_columns, &["name", "airway_name", "ident", "route_name"]));
-    if name == "''" && table_exists(connection, "Airways")? {
-        let airway_columns = table_columns(connection, "Airways")?;
-        if let (Some(leg_airway_id), Some(airway_id), Some(airway_name)) = (find_column(&leg_columns, &["airwayid", "airway_id"]), find_column(&airway_columns, &["id", "airwayid", "airway_id"]), find_column(&airway_columns, &["name", "ident", "airway_name"])) {
-            joins = format!(" LEFT JOIN \"Airways\" AS airway ON leg.{} = airway.{}", quote_identifier(&leg_airway_id), quote_identifier(&airway_id));
-            name = qualified_text_expression("airway", Some(airway_name));
-        }
-    }
-    let sql = format!(
-        "SELECT {name}, {from_longitude}, {from_latitude}, {to_longitude}, {to_latitude} FROM \"AirwayLegs\" AS leg JOIN \"Waypoints\" AS from_point ON leg.{} = from_point.{} JOIN \"Waypoints\" AS to_point ON leg.{} = to_point.{}{joins} WHERE MAX({from_latitude}, {to_latitude}) >= ?1 AND MIN({from_latitude}, {to_latitude}) <= ?2 AND MAX({from_longitude}, {to_longitude}) >= ?3 AND MIN({from_longitude}, {to_longitude}) <= ?4 LIMIT {limit}",
-        quote_identifier(&from_leg), quote_identifier(&waypoint_id), quote_identifier(&to_leg), quote_identifier(&waypoint_id),
-    );
-    collect_airway_segments(connection, sql, west, south, east, north)
+    let sql = format!("SELECT airway.Ident, leg.AirwayID, leg.ID, leg.Waypoint1ID, leg.Waypoint2ID, leg.IsStart, waypoint1.Longtitude, waypoint1.Latitude, waypoint2.Longtitude, waypoint2.Latitude FROM AirwayLegs AS leg JOIN Airways AS airway ON airway.ID = leg.AirwayID JOIN Waypoints AS waypoint1 ON waypoint1.ID = leg.Waypoint1ID JOIN Waypoints AS waypoint2 ON waypoint2.ID = leg.Waypoint2ID WHERE MAX(waypoint1.Latitude, waypoint2.Latitude) >= ?1 AND MIN(waypoint1.Latitude, waypoint2.Latitude) <= ?2 AND MAX(waypoint1.Longtitude, waypoint2.Longtitude) >= ?3 AND MIN(waypoint1.Longtitude, waypoint2.Longtitude) <= ?4 ORDER BY leg.AirwayID, leg.ID LIMIT {limit}");
+    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+    let rows = statement.query_map(params![south, north, west, east], |row| Ok(AirwaySegment {
+        name: row.get(0)?, group: row.get::<_, i64>(1)?.to_string(), sequence: row.get(2)?, from_id: row.get(3)?, to_id: row.get(4)?, is_start: row.get::<_, i64>(5)? != 0, from: [row.get(6)?, row.get(7)?], to: [row.get(8)?, row.get(9)?],
+    })).map_err(|error| error.to_string())?;
+    let segments = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(merge_fenix_airways(segments))
 }
 
 fn map_airways(connection: &Connection, source: &NavigationSource, west: f64, south: f64, east: f64, north: f64, zoom: f64) -> Result<Vec<NavigationAirway>, String> {
