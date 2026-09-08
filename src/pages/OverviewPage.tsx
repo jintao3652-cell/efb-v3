@@ -1,16 +1,20 @@
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Check, CircleAlert, CloudSun, MapPinned, PlaneTakeoff, Radio, ShieldCheck } from "lucide-react";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { cachedWeather, demoPlan } from "../lib/data";
+import { listFlightPlans } from "../lib/tauri";
 
 const checklist = ["检查飞行计划与航路", "确认起降机场天气", "查看 NOTAM 与跑道状态", "下载所需航图至本地"];
 
 export function OverviewPage() {
+  const flightPlans = useQuery({ queryKey: ["flight-plans"], queryFn: listFlightPlans });
+  const currentPlan = flightPlans.data?.[0] ?? demoPlan;
   return <div className="overview-page page-stack">
     <div className="welcome-row"><div><h2>下午好，飞行员</h2><p>所有关键飞行信息已准备就绪。</p></div><StatusBadge tone="success"><ShieldCheck size={14} /> AIRAC 2609 有效</StatusBadge></div>
     <section className="hero-card">
-      <div className="hero-route"><div><p className="eyebrow">当前飞行计划</p><h2>{demoPlan.callsign}</h2><p>{demoPlan.aircraft} · {demoPlan.cruiseAltitude} · 预计 2 小时 10 分</p></div><div className="route-display"><strong>{demoPlan.departure}</strong><div className="route-line"><PlaneTakeoff size={19} /></div><strong>{demoPlan.arrival}</strong></div></div>
-      <div className="hero-footer"><span>ETD {new Date(demoPlan.etd).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 本地时间</span><Link className="button primary" to="/flight-plans">查看计划 <ArrowRight size={16} /></Link></div>
+      <div className="hero-route"><div><p className="eyebrow">当前飞行计划</p><h2>{currentPlan.callsign || "未命名计划"}</h2><p>{currentPlan.aircraft} · {currentPlan.cruiseAltitude} · 最近导入 / 创建</p></div><div className="route-display"><strong>{currentPlan.departure}</strong><div className="route-line"><PlaneTakeoff size={19} /></div><strong>{currentPlan.arrival}</strong></div></div>
+      <div className="hero-footer"><span>ETD {new Date(currentPlan.etd).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 本地时间</span><Link className="button primary" to="/flight-plans">查看计划 <ArrowRight size={16} /></Link></div>
     </section>
     <div className="dashboard-grid">
       <section className="panel weather-panel"><div className="panel-header"><div><p className="eyebrow">出发地天气</p><h3>{cachedWeather.station} · 北京首都</h3></div><CloudSun className="accent-icon" size={27} /></div><div className="weather-main"><strong>22°</strong><span>晴间多云</span></div><div className="stat-row"><span>风 {cachedWeather.wind}</span><span>能见度 {cachedWeather.visibility}</span><span>QNH {cachedWeather.qnh}</span></div><Link to="/weather" className="text-link">查看 METAR / TAF <ArrowRight size={15} /></Link></section>

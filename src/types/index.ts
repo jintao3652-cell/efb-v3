@@ -12,6 +12,7 @@ export interface FlightPlan {
   etd: string;
   status: FlightPlanStatus;
   updatedAt: string;
+  importedAt: string;
 }
 
 export interface Airport {
