@@ -43,5 +43,6 @@ export interface WeatherReport {
   temperature: string;
   qnh: string;
   observedAt: string;
-  source: "实时" | "缓存" | "OpenWeather";
+  source: "实时" | "缓存" | "OpenWeather" | "中国气象局航空气象";
+  taf: string;
 }

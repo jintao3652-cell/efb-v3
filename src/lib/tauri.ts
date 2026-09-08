@@ -19,6 +19,13 @@ export interface SimBriefFlight {
   scheduledOut: string;
 }
 
+export interface ChartFoxChart {
+  id: string;
+  title: string;
+  chartType: string;
+  url: string;
+}
+
 export const isTauri = () => "__TAURI_INTERNALS__" in window;
 
 export async function listFlightPlans(): Promise<FlightPlan[]> {
@@ -54,4 +61,9 @@ export async function getCurrentAiracCycle(): Promise<AiracCycle> {
 export async function importSimBriefFlight(username: string): Promise<SimBriefFlight> {
   if (!isTauri()) throw new Error("SimBrief 导入仅在桌面应用中可用");
   return invoke<SimBriefFlight>("import_simbrief_flight", { username });
+}
+
+export async function listChartFoxCharts(icao: string): Promise<ChartFoxChart[]> {
+  if (!isTauri()) throw new Error("ChartFox 查询仅在桌面应用中可用");
+  return invoke<ChartFoxChart[]>("list_chartfox_charts", { icao });
 }

@@ -40,5 +40,5 @@ export const demoPlan: FlightPlan = {
 
 export const cachedWeather: WeatherReport = {
   station: "ZBAA", raw: "ZBAA 080400Z 03004MPS 9999 FEW030 22/13 Q1018 NOSIG",
-  wind: "030° / 4 m/s", visibility: "10 km 以上", temperature: "22°C / 13°C", qnh: "1018 hPa", observedAt: "04:00 UTC", source: "缓存",
+  wind: "030° / 4 m/s", visibility: "10 km 以上", temperature: "22°C / 13°C", qnh: "1018 hPa", observedAt: "04:00 UTC", source: "缓存", taf: "缓存的 TAF 不可用",
 };
