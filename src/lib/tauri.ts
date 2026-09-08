@@ -55,6 +55,23 @@ export interface ChartFoxChart {
   url: string;
 }
 
+export interface LocalChartLibraryStatus {
+  ready: boolean;
+  path?: string;
+  sourceType?: "folder" | "zip";
+  airportCount: number;
+  chartCount: number;
+  message: string;
+}
+
+export interface LocalChart {
+  id: string;
+  airport: string;
+  title: string;
+  category: "机场" | "进场" | "离场" | "航路";
+  revision: string;
+}
+
 export interface NavigationDatabaseStatus {
   source: "lnm" | "fenix";
   databasePath?: string;
@@ -118,6 +135,26 @@ export async function importSimBriefFlight(username: string): Promise<SimBriefFl
 export async function listChartFoxCharts(icao: string): Promise<ChartFoxChart[]> {
   if (!isTauri()) throw new Error("ChartFox 查询仅在桌面应用中可用");
   return invoke<ChartFoxChart[]>("list_chartfox_charts", { icao });
+}
+
+export async function getLocalChartLibraryStatus(): Promise<LocalChartLibraryStatus> {
+  if (!isTauri()) return { ready: false, airportCount: 0, chartCount: 0, message: "浏览器模式不支持本地航图库" };
+  return invoke<LocalChartLibraryStatus>("get_local_chart_library_status");
+}
+
+export async function setLocalChartLibrary(path: string): Promise<LocalChartLibraryStatus> {
+  if (!isTauri()) throw new Error("本地航图库仅在桌面应用中可用");
+  return invoke<LocalChartLibraryStatus>("set_local_chart_library", { path });
+}
+
+export async function listLocalCharts(): Promise<LocalChart[]> {
+  if (!isTauri()) return [];
+  return invoke<LocalChart[]>("list_local_charts");
+}
+
+export async function openLocalChart(chartId: string): Promise<string> {
+  if (!isTauri()) throw new Error("本地航图库仅在桌面应用中可用");
+  return invoke<string>("open_local_chart", { chartId });
 }
 
 export async function getNavigationDatabaseStatus(): Promise<NavigationDatabaseStatus> {
