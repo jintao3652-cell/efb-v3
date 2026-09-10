@@ -45,6 +45,16 @@ npm run tauri build -- --target x86_64-pc-windows-msvc
 
 应用演示数据不提供真实航图或商业 AIRAC 数据。接入 Navigraph、机场 AIP 或任何第三方数据前，必须使用具有相应分发和缓存许可的账户/API。飞行前请以官方 AIP、NOTAM 和气象信息为准。
 
+机场页会读取项目根目录的 `AD_HP.csv`（GBK/GB18030），国内 `Z` 开头机场使用其中的 `TXT_NAME`、IATA、标高和坐标。机位、通信频率、跑道及在线航图来自 XFlySim EFB API；网络不可用时回退至本地导航数据库或内置数据。
+
+地图空域图层使用 Volanta CDN 托管的 VAT-Spy FIR/UIR 边界，以及 SimAware TRACON Project 的 APP/DEP 边界。TRACON 每 60 秒读取 VATSIM 在线席位，以最长 `prefix` 和 `suffix` 匹配呼号，例如 `ZSSS_APP` 匹配 `ZSSS`、`ZSSS_E_APP` 优先匹配 `ZSSS_E`。终端航路点使用独立开关，默认关闭，并仅在地图放大到较高层级后显示；SimBrief 航路所需坐标点仍会保留。
+
+地图放大至 Zoom 12 后会按当前可视范围从 OpenStreetMap Overpass 服务加载公开机场地面数据，包括跑道、滑行道、滑行道编号、机坪、航站楼、机位和登机口。该功能无需登录，数据完整度取决于 OpenStreetMap 社区标注。
+
+地图每 15 秒读取 VATSIM 在线航班位置。点击飞机标记会打开侧边航班详情，显示呼号、起降机场、机型、高度、地速、航向、应答机、QNH、飞行员和计划航路等公开信息。
+
+使用 Fenix `nd.db3` 时，地图默认隐藏数据库中以经纬度格式命名的航点；当前飞行计划按标识或坐标实际经过这些点时会自动保留，并继续显示在 SimBrief 航路上。
+
 ### OpenWeather（可选）
 
 天气页优先使用中国气象局航空气象的 `http://avimet.nmc.cn/hangkong/METAR/{ICAO}.json` 和 `http://avimet.nmc.cn/hangkong/TAF/{ICAO}.json`。服务不可用时，配置 `OPENWEATHER_API_KEY` 后会回退至 OpenWeather，否则使用 Aviation Weather Center 的 METAR 查询。所有数据只作补充态势参考，不能替代官方航空气象资料。地图底图数据来自 OpenStreetMap contributors。

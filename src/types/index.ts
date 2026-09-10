@@ -1,5 +1,3 @@
-export type FlightPlanStatus = "草稿" | "计划中" | "已完成";
-
 export interface FlightRoutePoint {
   ident: string;
   name: string;
@@ -17,7 +15,6 @@ export interface FlightPlan {
   aircraft: string;
   cruiseAltitude: string;
   etd: string;
-  status: FlightPlanStatus;
   updatedAt: string;
   importedAt: string;
   routePoints: FlightRoutePoint[];

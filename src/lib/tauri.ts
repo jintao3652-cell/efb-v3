@@ -96,6 +96,13 @@ export interface NavigationAirportDetails {
   frequencies: Array<{ name: string; value: string }>;
 }
 
+export interface XflyAirportData {
+  gates: Array<{ id: number; gateRef: string; gateType: string; latitude: number; longitude: number }>;
+  frequencies: Array<{ id: string; airportIdent: string; description: string; frequencyType: string; frequencyMhz: string }>;
+  runways: Array<{ id: string; airportIdent: string; leIdent: string; heIdent: string; lengthFt: string; widthFt: string; surface: string; leLatitudeDeg: string; leLongitudeDeg: string; heLatitudeDeg: string; heLongitudeDeg: string; closed: string }>;
+  charts: Array<{ id: string; indexNumber: string; name: string; category: string; revisionDate: string; imageDayUrl: string; imageNightUrl: string; thumbDayUrl: string; thumbNightUrl: string }>;
+}
+
 export const isTauri = () => "__TAURI_INTERNALS__" in window;
 
 export async function listFlightPlans(): Promise<FlightPlan[]> {
@@ -181,4 +188,15 @@ export async function getNavigationAirportDetails(icao: string): Promise<Navigat
 export async function getNavigationMapData(viewport: MapViewport): Promise<NavigationMapData> {
   if (!isTauri()) return { airports: [], navaids: [], airways: [] };
   return invoke<NavigationMapData>("get_navigation_map_data", { west: viewport.west, south: viewport.south, east: viewport.east, north: viewport.north, zoom: viewport.zoom });
+}
+
+export async function getXflyAirportData(icao: string): Promise<XflyAirportData> {
+  if (isTauri()) return invoke<XflyAirportData>("get_xfly_airport_data", { icao });
+  const endpoint = async <T,>(name: string) => {
+    const response = await fetch(`https://api.xflysim.com/pilot/api/efb/${name}/${icao}`);
+    if (!response.ok) throw new Error(`XFlySim ${name} API 请求失败`);
+    return (await response.json() as { data: T }).data;
+  };
+  const [gates, frequencies, runways, charts] = await Promise.all([endpoint<XflyAirportData["gates"]>("gates"), endpoint<XflyAirportData["frequencies"]>("frequency"), endpoint<XflyAirportData["runways"]>("runway"), endpoint<XflyAirportData["charts"]>("charts")]);
+  return { gates, frequencies, runways, charts };
 }

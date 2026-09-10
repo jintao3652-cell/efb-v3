@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Database, HardDrive, Moon, RefreshCw, Sun, Trash2, Upload } from "lucide-react";
 import { clearCache, getCurrentAiracCycle, getNavigationDatabaseStatus, setNavigationDatabase } from "../lib/tauri";
@@ -7,12 +7,13 @@ import { useAppStore } from "../stores/app-store";
 
 export function SettingsPage() {
   const { theme, setTheme, language, setLanguage } = useAppStore();
+  const queryClient = useQueryClient();
   const [message, setMessage] = useState("");
   const airac = useQuery({ queryKey: ["current-airac-cycle"], queryFn: getCurrentAiracCycle, retry: 1 });
   const navigation = useQuery({ queryKey: ["navigation-database"], queryFn: getNavigationDatabaseStatus, retry: 0 });
   const navigationMutation = useMutation({
     mutationFn: ({ source, databasePath }: { source: "lnm" | "fenix"; databasePath?: string }) => setNavigationDatabase(source, databasePath),
-    onSuccess: (status) => { navigation.refetch(); setMessage(status.message); },
+    onSuccess: (status) => { queryClient.setQueryData(["navigation-database"], status); setMessage(status.message); },
   });
   const cycle = airac.data?.cycleId ?? "2609";
   const navStatus = navigation.data;
@@ -48,7 +49,7 @@ export function SettingsPage() {
         <button className={navStatus?.source !== "fenix" ? "active" : ""} onClick={() => chooseDatabase("lnm")} disabled={navigationMutation.isPending}><strong>Little Navmap</strong><span>机场、航路点、跑道、通信和 AIRAC</span><Upload size={16} /></button>
         <button className={navStatus?.source === "fenix" ? "active" : ""} onClick={() => chooseDatabase("fenix")} disabled={navigationMutation.isPending}><strong>Fenix</strong><span>nd.db3：Airports、Waypoints、Runways 和 AIRAC</span><Upload size={16} /></button>
       </div>
-      <div className="setting-row"><div><strong>{navStatus?.ready ? `已加载 ${navSourceName} · AIRAC ${navStatus.airacCycle ?? "未知"}` : "数据库状态"}</strong><p>{navigationMutation.isError ? navigationMutation.error.message : navStatus?.message ?? "正在检查导航数据库"}</p></div>{navStatus?.databasePath && <span className="database-path">{navStatus.databasePath.split(/[\\/]/).pop()}</span>}</div>
+      <div className="setting-row"><div><strong>{navStatus?.ready ? `已加载 ${navSourceName} · AIRAC ${navStatus.airacCycle ?? "未知"}` : "数据库状态"}</strong><p>{navigationMutation.isError ? navigationMutation.error.message : navigation.isError ? navigation.error.message : navStatus?.message ?? "正在检查导航数据库"}</p></div>{navStatus?.databasePath && <span className="database-path">{navStatus.databasePath.split(/[\\/]/).pop()}</span>}</div>
     </section>
     <section className="panel setting-section">
       <div className="setting-title"><div><Database className="accent-icon" size={22} /><div><h3>航行数据</h3><p>{airac.data ? `${airac.data.provider} · 周期开始于 ${new Date(airac.data.cycleStartDate).toLocaleDateString("zh-CN")}` : "正在检查 Navigraph FMS Data 周期"}</p></div></div><span className="data-cycle">AIRAC {cycle}</span></div>

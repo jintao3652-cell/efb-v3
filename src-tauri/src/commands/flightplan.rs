@@ -14,7 +14,6 @@ pub struct FlightPlan {
     pub aircraft: String,
     pub cruise_altitude: String,
     pub etd: String,
-    pub status: String,
     pub updated_at: String,
     pub imported_at: String,
     pub route_points: Vec<FlightRoutePoint>,
@@ -63,10 +62,10 @@ fn connection() -> Result<Connection, String> {
 #[tauri::command]
 pub fn list_flight_plans() -> Result<Vec<FlightPlan>, String> {
     let connection = connection()?;
-    let mut statement = connection.prepare("SELECT id, callsign, departure, arrival, alternate, route, aircraft, cruise_altitude, etd, status, updated_at, imported_at, route_points FROM flight_plans ORDER BY imported_at DESC, updated_at DESC").map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT id, callsign, departure, arrival, alternate, route, aircraft, cruise_altitude, etd, updated_at, imported_at, route_points FROM flight_plans ORDER BY imported_at DESC, updated_at DESC").map_err(|error| error.to_string())?;
     let plans = statement.query_map([], |row| {
-        let route_points = row.get::<_, String>(12).ok().and_then(|value| serde_json::from_str(&value).ok()).unwrap_or_default();
-        Ok(FlightPlan { id: row.get(0)?, callsign: row.get(1)?, departure: row.get(2)?, arrival: row.get(3)?, alternate: row.get(4)?, route: row.get(5)?, aircraft: row.get(6)?, cruise_altitude: row.get(7)?, etd: row.get(8)?, status: row.get(9)?, updated_at: row.get(10)?, imported_at: row.get(11)?, route_points })
+        let route_points = row.get::<_, String>(11).ok().and_then(|value| serde_json::from_str(&value).ok()).unwrap_or_default();
+        Ok(FlightPlan { id: row.get(0)?, callsign: row.get(1)?, departure: row.get(2)?, arrival: row.get(3)?, alternate: row.get(4)?, route: row.get(5)?, aircraft: row.get(6)?, cruise_altitude: row.get(7)?, etd: row.get(8)?, updated_at: row.get(9)?, imported_at: row.get(10)?, route_points })
     }).map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     Ok(plans)
@@ -76,6 +75,6 @@ pub fn list_flight_plans() -> Result<Vec<FlightPlan>, String> {
 pub fn save_flight_plan(plan: FlightPlan) -> Result<FlightPlan, String> {
     let connection = connection()?;
     let route_points = serde_json::to_string(&plan.route_points).map_err(|error| error.to_string())?;
-    connection.execute("INSERT INTO flight_plans (id, callsign, departure, arrival, alternate, route, aircraft, cruise_altitude, etd, status, updated_at, imported_at, route_points) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ON CONFLICT(id) DO UPDATE SET callsign = excluded.callsign, departure = excluded.departure, arrival = excluded.arrival, alternate = excluded.alternate, route = excluded.route, aircraft = excluded.aircraft, cruise_altitude = excluded.cruise_altitude, etd = excluded.etd, status = excluded.status, updated_at = excluded.updated_at, route_points = excluded.route_points", params![plan.id, plan.callsign, plan.departure, plan.arrival, plan.alternate, plan.route, plan.aircraft, plan.cruise_altitude, plan.etd, plan.status, plan.updated_at, plan.imported_at, route_points]).map_err(|error| error.to_string())?;
+    connection.execute("INSERT INTO flight_plans (id, callsign, departure, arrival, alternate, route, aircraft, cruise_altitude, etd, status, updated_at, imported_at, route_points) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '', ?10, ?11, ?12) ON CONFLICT(id) DO UPDATE SET callsign = excluded.callsign, departure = excluded.departure, arrival = excluded.arrival, alternate = excluded.alternate, route = excluded.route, aircraft = excluded.aircraft, cruise_altitude = excluded.cruise_altitude, etd = excluded.etd, status = '', updated_at = excluded.updated_at, imported_at = excluded.imported_at, route_points = excluded.route_points", params![plan.id, plan.callsign, plan.departure, plan.arrival, plan.alternate, plan.route, plan.aircraft, plan.cruise_altitude, plan.etd, plan.updated_at, plan.imported_at, route_points]).map_err(|error| error.to_string())?;
     Ok(plan)
 }

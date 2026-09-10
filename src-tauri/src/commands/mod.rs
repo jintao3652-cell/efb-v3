@@ -1,4 +1,5 @@
 mod airac;
+mod airport;
 mod chart;
 mod chartfox;
 mod flightplan;
@@ -7,6 +8,7 @@ mod simbrief;
 mod weather;
 
 pub use airac::get_current_airac_cycle;
+pub use airport::get_xfly_airport_data;
 pub use chart::{cache_chart_pdf, clear_chart_cache, get_local_chart_library_status, list_local_charts, open_local_chart, set_local_chart_library};
 pub use chartfox::list_chartfox_charts;
 pub use flightplan::{list_flight_plans, save_flight_plan};

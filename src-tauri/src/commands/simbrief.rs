@@ -85,6 +85,13 @@ fn simbrief_route_points(payload: &Value) -> Vec<FlightRoutePoint> {
     points
 }
 
+fn simbrief_airport_point(payload: &Value, section: &str, ident: &str) -> Option<FlightRoutePoint> {
+    let airport = payload.pointer(section)?.as_object()?;
+    let latitude = coordinate(airport.get("pos_lat").or_else(|| airport.get("latitude")).or_else(|| airport.get("lat")), true)?;
+    let longitude = coordinate(airport.get("pos_long").or_else(|| airport.get("longitude")).or_else(|| airport.get("lon")), false)?;
+    Some(FlightRoutePoint { ident: ident.to_string(), name: value_text(airport.get("name")), latitude, longitude })
+}
+
 #[tauri::command]
 pub async fn import_simbrief_flight(username: String) -> Result<SimBriefFlight, String> {
     let username = username.trim().to_string();
@@ -105,7 +112,13 @@ pub async fn import_simbrief_flight(username: String) -> Result<SimBriefFlight, 
     let airline = first_text(&payload, &["/general/icao_airline", "/general/airline_icao"]);
     let flight_number = first_text(&payload, &["/general/flight_number", "/general/icao_flight_number"]);
     let callsign = first_text(&payload, &["/general/icao_flight_number", "/general/callsign"]);
-    let route_points = simbrief_route_points(&payload);
+    let mut route_points = simbrief_route_points(&payload);
+    if let Some(origin) = simbrief_airport_point(&payload, "/origin", &departure) {
+        if !route_points.first().is_some_and(|point| (point.latitude - origin.latitude).abs() < 0.00001 && (point.longitude - origin.longitude).abs() < 0.00001) { route_points.insert(0, origin); }
+    }
+    if let Some(destination) = simbrief_airport_point(&payload, "/destination", &arrival) {
+        if !route_points.last().is_some_and(|point| (point.latitude - destination.latitude).abs() < 0.00001 && (point.longitude - destination.longitude).abs() < 0.00001) { route_points.push(destination); }
+    }
     Ok(SimBriefFlight {
         username,
         callsign: if callsign.is_empty() { format!("{airline}{flight_number}") } else { callsign },
