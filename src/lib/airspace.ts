@@ -1,3 +1,5 @@
+import { fetchJsonWithRetry, loadCachedResource, type CachedResourceMeta } from "./network-cache";
+
 export interface GeoJsonFeatureCollection {
   type: "FeatureCollection";
   features: Array<{ type: "Feature"; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } }>;
@@ -55,6 +57,17 @@ export interface VatsimPilot {
   } | null;
 }
 
+export interface CachedGeoJsonCollection {
+  data: GeoJsonFeatureCollection;
+  meta: CachedResourceMeta;
+}
+
+export interface VatsimSnapshot {
+  controllers: VatsimController[];
+  pilots: VatsimPilot[];
+  meta: CachedResourceMeta;
+}
+
 const emptyCollection = (): GeoJsonFeatureCollection => ({ type: "FeatureCollection", features: [] });
 
 function normalizeCoordinates(value: unknown): unknown {
@@ -72,28 +85,49 @@ function normalizeGeoJson(payload: GeoJsonFeatureCollection): GeoJsonFeatureColl
   return { ...payload, features: payload.features.map((feature) => ({ ...feature, geometry: { ...feature.geometry, coordinates: normalizeCoordinates(feature.geometry.coordinates) } })) };
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.json() as Promise<T>;
+function fetchJson<T>(url: string) {
+  return fetchJsonWithRetry<T>(url, { timeoutMs: 15_000, retries: 1 });
 }
 
-export async function loadGlobalAirspace() {
-  const [fir, tracon] = await Promise.all([
-    fetchJson<GeoJsonFeatureCollection>("https://cdn.volanta.app/navdata/vatsim/boundaries.json"),
-    fetchJson<GeoJsonFeatureCollection>("https://cdn.volanta.app/vatsim/TRACONBoundaries.geojson"),
-  ]);
-  return { fir: normalizeGeoJson(fir), tracon: normalizeGeoJson(tracon) };
+async function loadCachedGeoJson(cacheKey: string, url: string, signal?: AbortSignal): Promise<CachedGeoJsonCollection> {
+  const result = await loadCachedResource({
+    cacheKey,
+    ttlMs: 24 * 60 * 60_000,
+    signal,
+    load: async (requestSignal) => normalizeGeoJson(await fetchJsonWithRetry<GeoJsonFeatureCollection>(url, { signal: requestSignal, timeoutMs: 18_000, retries: 1 })),
+  });
+  return result;
 }
 
-export async function loadVatsimControllers(): Promise<VatsimController[]> {
-  const payload = await fetchJson<{ controllers?: VatsimController[] }>("https://data.vatsim.net/v3/vatsim-data.json");
-  return payload.controllers ?? [];
+export function loadFirBoundaries(signal?: AbortSignal) {
+  return loadCachedGeoJson("vatsim-fir-boundaries-v1", "https://cdn.volanta.app/navdata/vatsim/boundaries.json", signal);
 }
 
-export async function loadVatsimPilots(): Promise<VatsimPilot[]> {
-  const payload = await fetchJson<{ pilots?: VatsimPilot[] }>("https://data.vatsim.net/v3/vatsim-data.json");
-  return payload.pilots ?? [];
+export function loadTraconBoundaries(signal?: AbortSignal) {
+  return loadCachedGeoJson("vatsim-tracon-boundaries-v1", "https://cdn.volanta.app/vatsim/TRACONBoundaries.geojson", signal);
+}
+
+export async function loadGlobalAirspace(signal?: AbortSignal) {
+  const [fir, tracon] = await Promise.all([loadFirBoundaries(signal), loadTraconBoundaries(signal)]);
+  return { fir: fir.data, tracon: tracon.data, status: { fir: fir.meta, tracon: tracon.meta } };
+}
+
+export async function loadVatsimSnapshot(signal?: AbortSignal): Promise<VatsimSnapshot> {
+  const result = await loadCachedResource({
+    cacheKey: "vatsim-live-snapshot-v1",
+    ttlMs: 12_000,
+    signal,
+    load: (requestSignal) => fetchJsonWithRetry<{ controllers?: VatsimController[]; pilots?: VatsimPilot[] }>("https://data.vatsim.net/v3/vatsim-data.json", { signal: requestSignal, timeoutMs: 12_000, retries: 1 }),
+  });
+  return { controllers: result.data.controllers ?? [], pilots: result.data.pilots ?? [], meta: result.meta };
+}
+
+export async function loadVatsimControllers(signal?: AbortSignal): Promise<VatsimController[]> {
+  return (await loadVatsimSnapshot(signal)).controllers;
+}
+
+export async function loadVatsimPilots(signal?: AbortSignal): Promise<VatsimPilot[]> {
+  return (await loadVatsimSnapshot(signal)).pilots;
 }
 
 function traconPrefixes(feature: GeoJsonFeatureCollection["features"][number]) {
