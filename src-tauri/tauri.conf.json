@@ -21,7 +21,8 @@
       "decorations": true
     }],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self' customprotocol: asset:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost https://api.xflysim.com https://cdn.volanta.app https://data.vatsim.net https://raw.githubusercontent.com https://overpass-api.de https://overpass.kumi.systems; img-src 'self' asset: http://asset.localhost data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob: asset: http://asset.localhost; frame-src 'self' asset: http://asset.localhost",
+      "devCsp": "default-src 'self' customprotocol: asset:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost ws: https://api.xflysim.com https://cdn.volanta.app https://data.vatsim.net https://raw.githubusercontent.com https://overpass-api.de https://overpass.kumi.systems; img-src 'self' asset: http://asset.localhost data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob: asset: http://asset.localhost; frame-src 'self' asset: http://asset.localhost",
       "assetProtocol": { "enable": true, "scope": ["$APPLOCALDATA/**"] }
     }
   },

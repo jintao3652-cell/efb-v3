@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 import type { Airport } from "../../types";
 import type { XflyAirportData } from "../../lib/tauri";
 import { loadOsmAirportGround, normalizeAirportGroundBounds } from "../../lib/osm-airport";
@@ -34,8 +35,8 @@ export function AirportGroundMap({ airport, data, selectedStand, onSelectStand }
       instance.addLayer({ id: "airport-runway-labels", type: "symbol", source: "airport-runways", minzoom: 13, layout: { "symbol-placement": "line", "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13, 12, 17, 17], "symbol-spacing": 360, "text-letter-spacing": .08, "text-allow-overlap": true, "text-rotation-alignment": "map", "text-pitch-alignment": "map" }, paint: { "text-color": "#58f3ff", "text-halo-color": "#071015", "text-halo-width": 2.6 } });
       instance.addLayer({ id: "airport-osm-runway-labels", type: "symbol", source: "airport-osm-ground", minzoom: 13, filter: ["all", ["==", ["get", "kind"], "runway"], ["!=", ["get", "label"], ""]], layout: { "symbol-placement": "line", "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13, 12, 17, 17], "symbol-spacing": 360, "text-allow-overlap": false, "text-rotation-alignment": "map", "text-pitch-alignment": "map" }, paint: { "text-color": "#58f3ff", "text-halo-color": "#071015", "text-halo-width": 2.6 } });
       instance.addLayer({ id: "airport-taxiway-labels", type: "symbol", source: "airport-osm-ground", minzoom: 13.5, filter: ["all", ["in", ["get", "kind"], ["literal", ["taxiway", "taxilane"]]], ["!=", ["get", "label"], ""]], layout: { "symbol-placement": "line", "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13.5, 10, 18, 15], "symbol-spacing": 115, "text-max-angle": 45, "text-allow-overlap": false, "text-rotation-alignment": "map", "text-pitch-alignment": "map", "text-keep-upright": true }, paint: { "text-color": "#f7fbff", "text-halo-color": "#071015", "text-halo-width": 2.4 } });
-      instance.addLayer({ id: "airport-gates", type: "circle", source: "airport-gates", minzoom: 14.8, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 14.8, 2.5, 18, 6], "circle-color": ["case", ["==", ["get", "ref"], selectedStand], "#ffbd62", "#69d7ff"], "circle-stroke-color": "#092033", "circle-stroke-width": 1.4 } });
-      instance.addLayer({ id: "airport-gate-labels", type: "symbol", source: "airport-gates", minzoom: 16.2, layout: { "text-field": ["get", "ref"], "text-size": 10, "text-offset": [0, 1], "text-anchor": "top", "text-allow-overlap": false }, paint: { "text-color": "#e7f7ff", "text-halo-color": "#071827", "text-halo-width": 1.5 } });
+      instance.addLayer({ id: "airport-gates", type: "circle", source: "airport-gates", minzoom: 10, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 14.8, 5, 18, 7], "circle-color": ["case", ["==", ["get", "ref"], selectedStand], "#ffbd62", "#12d99b"], "circle-stroke-color": "#f1fff9", "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 1.2, 16, 2] } });
+      instance.addLayer({ id: "airport-gate-labels", type: "symbol", source: "airport-gates", minzoom: 14, layout: { "text-field": ["get", "ref"], "text-size": ["interpolate", ["linear"], ["zoom"], 14, 9, 18, 12], "text-offset": [0, 1], "text-anchor": "top", "text-allow-overlap": false }, paint: { "text-color": "#12d99b", "text-halo-color": "#061a13", "text-halo-width": 1.8 } });
       instance.on("click", "airport-gates", (event) => { const ref = event.features?.[0]?.properties?.ref; if (ref) onSelectStand(String(ref)); });
       instance.on("mouseenter", "airport-gates", () => { instance.getCanvas().style.cursor = "pointer"; });
       instance.on("mouseleave", "airport-gates", () => { instance.getCanvas().style.cursor = ""; });
@@ -67,7 +68,7 @@ export function AirportGroundMap({ airport, data, selectedStand, onSelectStand }
   }, [mapReady, osmGround.data]);
 
   useEffect(() => {
-    if (map.current?.getLayer("airport-gates")) map.current.setPaintProperty("airport-gates", "circle-color", ["case", ["==", ["get", "ref"], selectedStand], "#ffbd62", "#69d7ff"]);
+    if (map.current?.getLayer("airport-gates")) map.current.setPaintProperty("airport-gates", "circle-color", ["case", ["==", ["get", "ref"], selectedStand], "#ffbd62", "#12d99b"]);
   }, [selectedStand]);
 
   return <div className="ground-map"><div className="ground-map-header"><div><strong>{airport.icao} 机位、跑道与滑行道</strong><span>XFlySim 跑道/机位 · OpenStreetMap 滑行道名称 · 放大后显示详细编号</span></div><span>{osmGround.isFetching ? "正在加载地面标注" : selectedStand ? `已选择：${selectedStand}` : `${data?.gates.length ?? 0} 个机位`}</span></div><div className="airport-ground-canvas" ref={container} /><div className="ground-map-legend"><span><i className="stand-symbol" />机位</span><span><i className="stand-symbol selected" />当前选择</span><span><i className="line-symbol" />跑道中心线</span><span>RW：跑道 · 字母/数字：滑行道</span></div></div>;

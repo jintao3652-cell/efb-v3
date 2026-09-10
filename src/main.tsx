@@ -5,17 +5,13 @@ import { BrowserRouter } from "react-router-dom";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles.css";
 import App from "./App";
+import { AppErrorBoundary } from "./components/common/AppErrorBoundary";
 import { getNavigationDatabaseStatus, isTauri } from "./lib/tauri";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 60_000 } } });
 
-async function bootstrap() {
-  if (isTauri()) {
-    await queryClient.prefetchQuery({ queryKey: ["navigation-database"], queryFn: getNavigationDatabaseStatus, retry: 0 });
-  }
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode><QueryClientProvider client={queryClient}><BrowserRouter><App /></BrowserRouter></QueryClientProvider></StrictMode>,
-  );
-}
+createRoot(document.getElementById("root")!).render(
+  <StrictMode><AppErrorBoundary><QueryClientProvider client={queryClient}><BrowserRouter><App /></BrowserRouter></QueryClientProvider></AppErrorBoundary></StrictMode>,
+);
 
-void bootstrap();
+if (isTauri()) void queryClient.prefetchQuery({ queryKey: ["navigation-database"], queryFn: getNavigationDatabaseStatus, retry: 0 });

@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Desktop application permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "fs:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

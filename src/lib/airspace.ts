@@ -85,8 +85,12 @@ function normalizeGeoJson(payload: GeoJsonFeatureCollection): GeoJsonFeatureColl
   return { ...payload, features: payload.features.map((feature) => ({ ...feature, geometry: { ...feature.geometry, coordinates: normalizeCoordinates(feature.geometry.coordinates) } })) };
 }
 
-function fetchJson<T>(url: string) {
-  return fetchJsonWithRetry<T>(url, { timeoutMs: 15_000, retries: 1 });
+function fetchJson<T>(url: string, signal?: AbortSignal) {
+  return fetchJsonWithRetry<T>(url, { signal, timeoutMs: 15_000, retries: 1 });
+}
+
+async function loadCachedJson<T>(cacheKey: string, url: string, signal?: AbortSignal) {
+  return (await loadCachedResource({ cacheKey, ttlMs: 24 * 60 * 60_000, signal, load: (requestSignal) => fetchJson<T>(url, requestSignal) })).data;
 }
 
 async function loadCachedGeoJson(cacheKey: string, url: string, signal?: AbortSignal): Promise<CachedGeoJsonCollection> {
@@ -180,32 +184,42 @@ function vatGlassesFeatures(airspace: unknown, positions: Record<string, Record<
   const features: GeoJsonFeatureCollection["features"] = [];
   for (const [key, item] of asEntries(airspace)) {
     const id = String(item.id ?? key);
-    const owner = ownership?.airspace?.[key]?.[0] ?? ownership?.airspace?.[id]?.[0] ?? (item.owner as string[] | undefined)?.[0] ?? item.parent;
-    const position = owner ? positions[String(owner)] : undefined;
+    const ownershipOwners = ownership?.airspace?.[key] ?? ownership?.airspace?.[id] ?? [];
+    const itemOwners = Array.isArray(item.owner) ? item.owner.map(String) : item.parent ? [String(item.parent)] : [];
+    const owners = [...ownershipOwners, ...itemOwners];
+    const owner = owners.find((candidate) => positions[candidate]) ?? owners[0];
+    const position = owner ? positions[owner] : undefined;
     const colours = position?.colours as Array<{ hex?: string }> | undefined;
     const color = colours?.[0]?.hex || "#48d7ff";
     for (const sector of (item.sectors as Array<Record<string, unknown>> | undefined) ?? []) {
       const points = sector.points as Array<[string, string]> | undefined;
       if (!points?.length) continue;
-      features.push({ type: "Feature", properties: { id, group: item.group ?? "SECTOR", min: sector.min ?? 0, max: sector.max ?? 999, color }, geometry: { type: "Polygon", coordinates: [points.map(([latitude, longitude]) => [dmsCoordinate(longitude), dmsCoordinate(latitude)])] } });
+      const coordinates = points.map(([latitude, longitude]) => [dmsCoordinate(longitude), dmsCoordinate(latitude)]).filter(([longitude, latitude]) => Number.isFinite(longitude) && Number.isFinite(latitude));
+      if (coordinates.length < 3) continue;
+      if (coordinates[0][0] !== coordinates.at(-1)?.[0] || coordinates[0][1] !== coordinates.at(-1)?.[1]) coordinates.push([...coordinates[0]]);
+      const minimum = Number(sector.min ?? 0);
+      const maximum = Number(sector.max ?? 999);
+      const group = String(item.group ?? position?.type ?? "SECTOR");
+      const altitude = maximum >= 900 ? `FL${minimum}+` : `FL${minimum}–${maximum}`;
+      features.push({ type: "Feature", properties: { id, sectorKey: key, group, min: minimum, max: maximum, color, owner: owner ?? "", callsign: position?.callsign ?? "", frequency: position?.frequency ?? "", label: `${id}\n${altitude}` }, geometry: { type: "Polygon", coordinates: [coordinates] } });
     }
   }
   return { type: "FeatureCollection" as const, features };
 }
 
-export async function loadVatGlassesDataset(dataset: string, customOwnership?: OwnershipFile): Promise<VatGlassesResult> {
+export async function loadVatGlassesDataset(dataset: string, customOwnership?: OwnershipFile, signal?: AbortSignal): Promise<VatGlassesResult> {
   const code = dataset.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!code) return { features: emptyCollection(), source: "未选择数据集" };
   const base = `https://raw.githubusercontent.com/lennycolton/vatglasses-data/main/data/${code}`;
   try {
-    const [airspacePayload, positionsPayload, presetOwnership] = await Promise.all([
-      fetchJson<{ airspace?: unknown }>(`${base}/airspace.json`),
-      fetchJson<{ positions?: Record<string, Record<string, unknown>> }>(`${base}/positions.json`),
-      customOwnership ? Promise.resolve(customOwnership) : fetchJson<OwnershipFile>(`${base}/ownership/default.json`),
+    const [airspacePayload, positionsPayload] = await Promise.all([
+      loadCachedJson<{ airspace?: unknown }>(`vatglasses-${code}-airspace-v2`, `${base}/airspace.json`, signal),
+      loadCachedJson<{ positions?: Record<string, Record<string, unknown>> }>(`vatglasses-${code}-positions-v2`, `${base}/positions.json`, signal),
     ]);
+    const presetOwnership = customOwnership ?? await loadCachedJson<OwnershipFile>(`vatglasses-${code}-ownership-default-v2`, `${base}/ownership/default.json`, signal).catch(() => undefined);
     return { features: vatGlassesFeatures(airspacePayload.airspace, positionsPayload.positions ?? {}, presetOwnership), ownership: presetOwnership, source: `VATGlasses ${code.toUpperCase()}` };
   } catch {
-    const payload = await fetchJson<{ airspace?: unknown; positions?: Record<string, Record<string, unknown>> }>(`${base}.json`);
+    const payload = await loadCachedJson<{ airspace?: unknown; positions?: Record<string, Record<string, unknown>> }>(`vatglasses-${code}-single-v2`, `${base}.json`, signal);
     return { features: vatGlassesFeatures(payload.airspace, payload.positions ?? {}, customOwnership), ownership: customOwnership, source: `VATGlasses ${code.toUpperCase()}` };
   }
 }

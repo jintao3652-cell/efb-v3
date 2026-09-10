@@ -5,6 +5,12 @@ export interface FlightRoutePoint {
   longitude: number;
 }
 
+export interface FlightProcedureSelection {
+  name: string;
+  transition: string;
+  points: FlightRoutePoint[];
+}
+
 export interface FlightPlan {
   id: string;
   callsign: string;
@@ -18,6 +24,40 @@ export interface FlightPlan {
   updatedAt: string;
   importedAt: string;
   routePoints: FlightRoutePoint[];
+  departureRunway?: string;
+  arrivalRunway?: string;
+  sid?: FlightProcedureSelection;
+  star?: FlightProcedureSelection;
+  approach?: FlightProcedureSelection;
+}
+
+export interface FlightPlanAirportPanelData {
+  icao: string;
+  iata: string;
+  name: string;
+  city: string;
+  vfr: boolean;
+  metar: string;
+}
+
+export interface FlightPlanData {
+  planId: string;
+  callsign: string;
+  origin: FlightPlanAirportPanelData & {
+    runway: string;
+    wind: string;
+    sid: string;
+    transition: string;
+  };
+  destination: FlightPlanAirportPanelData & {
+    runway: string;
+    wind: string;
+    star: string;
+    transition: string;
+    approach: string;
+    approachesCount: number;
+  };
+  alternate: FlightPlanAirportPanelData | null;
 }
 
 export interface Airport {

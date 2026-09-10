@@ -1,4 +1,4 @@
-import type { Airport, Chart, FlightPlan, WeatherReport } from "../types";
+import type { Airport, FlightPlan } from "../types";
 
 export const airports: Airport[] = [
   {
@@ -23,23 +23,9 @@ export const airports: Airport[] = [
   },
 ];
 
-export const charts: Chart[] = [
-  { id: "zbaa-ad", airport: "ZBAA", category: "机场", title: "机场图 / Aerodrome Chart", revision: "AIRAC 2609", cached: true },
-  { id: "zbaa-iac", airport: "ZBAA", category: "进场", title: "ILS Z RWY 01", revision: "AIRAC 2609", cached: false },
-  { id: "zbaa-sid", airport: "ZBAA", category: "离场", title: "RENOB-1A Departure", revision: "AIRAC 2609", cached: true },
-  { id: "zspd-ad", airport: "ZSPD", category: "机场", title: "机场图 / Aerodrome Chart", revision: "AIRAC 2609", cached: true },
-  { id: "zspd-iac", airport: "ZSPD", category: "进场", title: "ILS Z RWY 35R", revision: "AIRAC 2609", cached: false },
-  { id: "zggg-sid", airport: "ZGGG", category: "离场", title: "LIG-1A Departure", revision: "AIRAC 2609", cached: false },
-];
-
-export const demoPlan: FlightPlan = {
-  id: "demo-zbaa-zspd", callsign: "CSN 6981", departure: "ZBAA", arrival: "ZSPD", alternate: "ZSHC",
-  route: "RENOB W36 POU W47 DUMET A593 PUD", aircraft: "A320neo", cruiseAltitude: "FL340",
-  etd: "2026-09-08T12:30", updatedAt: "2026-09-08T12:00:00.000Z", importedAt: "2026-09-08T12:00:00.000Z",
+export const flightPlanTemplate: FlightPlan = {
+  id: "", callsign: "", departure: "ZBAA", arrival: "ZSPD", alternate: "",
+  route: "", aircraft: "", cruiseAltitude: "",
+  etd: "", updatedAt: "", importedAt: "",
   routePoints: [],
-};
-
-export const cachedWeather: WeatherReport = {
-  station: "ZBAA", raw: "ZBAA 080400Z 03004MPS 9999 FEW030 22/13 Q1018 NOSIG",
-  wind: "030° / 4 m/s", visibility: "10 km 以上", temperature: "22°C / 13°C", qnh: "1018 hPa", observedAt: "04:00 UTC", source: "缓存", taf: "缓存的 TAF 不可用",
 };

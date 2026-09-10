@@ -14,6 +14,7 @@ interface CacheRecord<T> {
   key: string;
   cachedAt: number;
   data: T;
+  size?: number;
 }
 
 interface CachedResourceOptions<T> {
@@ -32,9 +33,13 @@ interface FetchJsonOptions extends Omit<RequestInit, "signal"> {
 
 const databaseName = "skyboard-network-cache";
 const storeName = "responses";
+const maxCacheRecords = 180;
+const maxCacheAgeMs = 14 * 24 * 60 * 60_000;
+const maxCacheBytes = 64 * 1024 * 1024;
 const memoryCache = new Map<string, CacheRecord<unknown>>();
 const inFlightRequests = new Map<string, Promise<CachedResource<unknown>>>();
 let databasePromise: Promise<IDBDatabase | undefined> | undefined;
+let cacheGeneration = 0;
 
 class HttpError extends Error {
   constructor(public status: number, statusText: string) {
@@ -86,6 +91,7 @@ async function readCache<T>(key: string): Promise<CacheRecord<T> | undefined> {
 
 async function writeCache<T>(record: CacheRecord<T>) {
   memoryCache.set(record.key, record);
+  pruneMemoryCache();
   const database = await openDatabase();
   if (!database) return;
   try {
@@ -94,9 +100,61 @@ async function writeCache<T>(record: CacheRecord<T>) {
       request.onsuccess = () => resolve();
       request.onerror = () => resolve();
     });
+    await prunePersistentCache(database);
   } catch {
     return;
   }
+}
+
+function recordsToDelete(records: CacheRecord<unknown>[]) {
+  const cutoff = Date.now() - maxCacheAgeMs;
+  const sorted = [...records].sort((first, second) => second.cachedAt - first.cachedAt);
+  let retainedBytes = 0;
+  return sorted.filter((record, index) => {
+    if (record.cachedAt < cutoff || index >= maxCacheRecords) return true;
+    const size = record.size ?? estimatedSize(record.data);
+    if (retainedBytes + size > maxCacheBytes) return true;
+    retainedBytes += size;
+    return false;
+  }).map((record) => record.key);
+}
+
+function estimatedSize(value: unknown) {
+  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength; } catch { return 0; }
+}
+
+function pruneMemoryCache() {
+  for (const key of recordsToDelete([...memoryCache.values()])) memoryCache.delete(key);
+}
+
+async function prunePersistentCache(database: IDBDatabase) {
+  const records = await new Promise<CacheRecord<unknown>[]>((resolve) => {
+    const request = database.transaction(storeName, "readonly").objectStore(storeName).getAll();
+    request.onsuccess = () => resolve(request.result as CacheRecord<unknown>[]);
+    request.onerror = () => resolve([]);
+  });
+  const keys = recordsToDelete(records);
+  if (!keys.length) return;
+  await new Promise<void>((resolve) => {
+    const transaction = database.transaction(storeName, "readwrite");
+    const store = transaction.objectStore(storeName);
+    for (const key of keys) store.delete(key);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+    transaction.onabort = () => resolve();
+  });
+}
+
+export async function clearNetworkCache() {
+  cacheGeneration += 1;
+  memoryCache.clear();
+  const database = await openDatabase();
+  if (!database) return;
+  await new Promise<void>((resolve) => {
+    const request = database.transaction(storeName, "readwrite").objectStore(storeName).clear();
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+  });
 }
 
 function abortError() {
@@ -170,6 +228,7 @@ export async function fetchJsonWithRetry<T>(url: string, options: FetchJsonOptio
 export async function loadCachedResource<T>({ cacheKey, ttlMs, signal, load }: CachedResourceOptions<T>): Promise<CachedResource<T>> {
   const existingRequest = inFlightRequests.get(cacheKey) as Promise<CachedResource<T>> | undefined;
   if (existingRequest) return existingRequest;
+  const generation = cacheGeneration;
   const request: Promise<CachedResource<T>> = (async () => {
     const cached = await readCache<T>(cacheKey);
     const age = cached ? Date.now() - cached.cachedAt : Number.POSITIVE_INFINITY;
@@ -180,8 +239,8 @@ export async function loadCachedResource<T>({ cacheKey, ttlMs, signal, load }: C
     }
     try {
       const data = await load(signal ?? new AbortController().signal);
-      const record = { key: cacheKey, cachedAt: Date.now(), data };
-      await writeCache(record);
+      const record = { key: cacheKey, cachedAt: Date.now(), data, size: estimatedSize(data) };
+      if (generation === cacheGeneration) await writeCache(record);
       return { data, meta: { source: "network", stale: false, cachedAt: record.cachedAt } };
     } catch (error) {
       if (signal?.aborted) throw error;

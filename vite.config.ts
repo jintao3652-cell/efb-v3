@@ -5,6 +5,10 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   plugins: [react()],
+  cacheDir: "node_modules/.vite-skyboard",
+  optimizeDeps: {
+    exclude: ["maplibre-gl"],
+  },
   clearScreen: false,
   server: {
     port: 1420,
