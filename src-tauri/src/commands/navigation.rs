@@ -304,8 +304,29 @@ fn airport_id_column(columns: &HashMap<String, String>) -> Option<String> {
     find_column(columns, &["airport_id", "airportid", "id", "airport_key"])
 }
 
+fn cycle_name_prefix(value: &str) -> Option<String> {
+    let cycle = value.trim().chars().take(4).collect::<String>();
+    (cycle.len() == 4 && cycle.chars().all(|character| character.is_ascii_digit())).then_some(cycle)
+}
+
 fn airac_cycle(connection: &Connection, table: &str) -> Option<String> {
     let columns = table_columns(connection, table).ok()?;
+    if let Some(column) = find_column(&columns, &["cyclename"]) {
+        let cycle_name: String = connection
+            .query_row(
+                &format!(
+                    "SELECT CAST({} AS TEXT) FROM {} LIMIT 1",
+                    quote_identifier(&column),
+                    quote_identifier(table)
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .ok()?;
+        if let Some(cycle) = cycle_name_prefix(&cycle_name) {
+            return Some(cycle);
+        }
+    }
     if let Some(column) = find_column(&columns, &["airac_cycle", "airac", "cycle", "cycle_id"]) {
         return connection
             .query_row(
@@ -321,6 +342,22 @@ fn airac_cycle(connection: &Connection, table: &str) -> Option<String> {
     }
     let key = find_column(&columns, &["key", "name", "setting", "parameter"])?;
     let value = find_column(&columns, &["value", "val", "data"])?;
+    let cycle_name = connection
+        .query_row(
+            &format!(
+                "SELECT CAST({} AS TEXT) FROM {} WHERE lower(CAST({} AS TEXT)) = 'cyclename' LIMIT 1",
+                quote_identifier(&value),
+                quote_identifier(table),
+                quote_identifier(&key)
+            ),
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|cycle_name| cycle_name_prefix(&cycle_name));
+    if cycle_name.is_some() {
+        return cycle_name;
+    }
     connection.query_row(
         &format!("SELECT CAST({} AS TEXT) FROM {} WHERE lower(CAST({} AS TEXT)) IN ('airac_cycle', 'airac', 'cycle', 'cycle_id') LIMIT 1", quote_identifier(&value), quote_identifier(table), quote_identifier(&key)),
         [], |row| row.get(0),

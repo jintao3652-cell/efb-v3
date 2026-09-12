@@ -75,7 +75,11 @@ fn cache_path(app: &AppHandle, station: &str) -> Result<PathBuf, String> {
 
 fn read_cached_weather(app: &AppHandle, station: &str) -> Option<WeatherReport> {
     let path = cache_path(app, station).ok()?;
-    let mut report = serde_json::from_slice::<WeatherReport>(&fs::read(path).ok()?).ok()?;
+    let mut report = serde_json::from_slice::<WeatherReport>(&fs::read(&path).ok()?).ok()?;
+    if !matches!(report.source.as_str(), "实时" | "OpenWeather") {
+        let _ = fs::remove_file(path);
+        return None;
+    }
     report.source = "缓存".to_string();
     Some(report)
 }
@@ -112,76 +116,6 @@ fn available(value: Option<&Value>) -> String {
     } else {
         result
     }
-}
-
-fn nmc_taf_summary(station: &str, taf: &Value) -> String {
-    format!(
-        "TAF {station} 有效期 {} 至 {} · 风 {}°/{} m/s · 能见度 {} · 云况 {}",
-        available(taf.get("VALID_START_TIME")),
-        available(taf.get("VALID_END_TIME")),
-        available(taf.get("MEAN_WIND_DIRECTION")),
-        available(taf.get("MEAN_WIND_SPEED")),
-        available(taf.get("PREVAG_VISIBILITY")),
-        available(taf.get("CLOUD_INFO"))
-    )
-}
-
-async fn nmc_weather_report(
-    client: &reqwest::Client,
-    station: &str,
-) -> Result<WeatherReport, String> {
-    let metar_url = reqwest::Url::parse(&format!(
-        "http://avimet.nmc.cn/hangkong/METAR/{station}.json"
-    ))
-    .map_err(|_| "无法创建中国气象局 METAR 请求".to_string())?;
-    let taf_url = reqwest::Url::parse(&format!("http://avimet.nmc.cn/hangkong/TAF/{station}.json"))
-        .map_err(|_| "无法创建中国气象局 TAF 请求".to_string())?;
-    let metar: Value = fetch_json(client, metar_url, "中国气象局 METAR 服务").await?;
-    let taf = fetch_json::<Value>(client, taf_url, "中国气象局 TAF 服务")
-        .await
-        .ok()
-        .map(|value| nmc_taf_summary(station, &value))
-        .unwrap_or_else(|| "TAF 暂不可用".to_string());
-    let wind_direction = available(metar.get("WIN_D"));
-    let wind_speed = available(metar.get("WIN_S"));
-    let visibility = available(metar.get("Vis_Hor"));
-    let temperature = available(metar.get("TEM"));
-    let dewpoint = available(metar.get("DPT"));
-    let qnh = available(metar.get("PRS_Sea"));
-    let visibility_display = if visibility == "--" {
-        "CAVOK / --".to_string()
-    } else {
-        format!("{visibility} m")
-    };
-    Ok(WeatherReport {
-        station: station.to_string(),
-        raw: format!(
-            "METAR {station} {} {}° {} m/s VIS {} T {}°C / {}°C Q{} hPa",
-            available(metar.get("time")),
-            wind_direction,
-            wind_speed,
-            visibility_display,
-            temperature,
-            dewpoint,
-            qnh
-        ),
-        wind: format!("{wind_direction}° / {wind_speed} m/s"),
-        visibility: visibility_display,
-        temperature: if temperature == "--" {
-            "--".to_string()
-        } else {
-            format!("{temperature}°C / {dewpoint}°C")
-        },
-        qnh: if qnh == "--" {
-            "--".to_string()
-        } else {
-            format!("{qnh} hPa")
-        },
-        observed_at: available(metar.get("time")),
-        source: "中国气象局航空气象".to_string(),
-        taf,
-        preview_url: None,
-    })
 }
 
 fn station_coordinates(station: &str) -> Option<(f64, f64)> {
@@ -327,12 +261,6 @@ async fn awc_weather_report(
 async fn live_weather(station: &str) -> Result<WeatherReport, String> {
     let client = weather_client()?;
     let mut errors = Vec::new();
-    if station.starts_with('Z') {
-        match nmc_weather_report(&client, station).await {
-            Ok(report) => return Ok(report),
-            Err(error) => errors.push(error),
-        }
-    }
     match awc_weather_report(&client, station).await {
         Ok(report) => return Ok(report),
         Err(error) => errors.push(error),

@@ -18,7 +18,6 @@ function notamStatus(validityState: string, effective: boolean) {
 }
 
 function providerName(source: string) {
-  if (source === "中国气象局航空气象") return source;
   if (source === "OpenWeather") return source;
   if (source === "实时") return "Aviation Weather Center";
   return "本地缓存";
