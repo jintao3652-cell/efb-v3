@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { FlightPlan, FlightRoutePoint, WeatherReport } from "../types";
+import type { FlightPlan, FlightRoutePoint, NotamReport, WeatherReport } from "../types";
 import { fetchJsonWithRetry } from "./network-cache";
 
 export interface AiracCycle {
@@ -188,6 +188,11 @@ export async function saveFlightPlan(plan: FlightPlan): Promise<FlightPlan> {
 export async function getWeather(station: string, preferCache = false): Promise<WeatherReport> {
   if (!isTauri()) throw new Error("天气服务仅在桌面应用中可用");
   return invoke<WeatherReport>("get_weather", { station, preferCache });
+}
+
+export async function getNotams(station: string): Promise<NotamReport> {
+  if (!isTauri()) throw new Error("NOTAM 服务仅在桌面应用中可用");
+  return invoke<NotamReport>("get_notams", { station });
 }
 
 export async function clearCache(): Promise<void> {

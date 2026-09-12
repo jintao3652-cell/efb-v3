@@ -101,3 +101,23 @@ export interface WeatherReport {
   taf: string;
   previewUrl?: string;
 }
+
+export interface NotamItem {
+  id: number;
+  number: string;
+  source: string;
+  qCode?: string;
+  validFromUtc: string;
+  validUntilUtc?: string;
+  schedule?: string;
+  validityState: string;
+  isEffectiveNow: boolean;
+  displayText: string;
+}
+
+export interface NotamReport {
+  station: string;
+  notams: NotamItem[];
+  policy: string;
+  cached: boolean;
+}
