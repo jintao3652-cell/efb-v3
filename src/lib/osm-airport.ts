@@ -30,7 +30,11 @@ export interface AirportGroundBounds {
   north: number;
 }
 
-const endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+const endpoints = [
+  "https://overpass.openstreetmap.fr/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 const requestGrid = 0.05;
 const maximumHalfSpan = 0.15;
 const overpassMinimumInterval = 1_500;
@@ -148,7 +152,7 @@ export async function loadOsmAirportGround(bounds: AirportGroundBounds, signal?:
   const normalizedBounds = normalizeAirportGroundBounds(bounds);
   const bbox = `${normalizedBounds.south},${normalizedBounds.west},${normalizedBounds.north},${normalizedBounds.east}`;
   const query = `[out:json][timeout:18];(way["aeroway"="runway"](${bbox});way["aeroway"="taxiway"](${bbox});way["aeroway"="taxilane"](${bbox});way["aeroway"="apron"](${bbox});way["aeroway"="terminal"](${bbox});way["building"="terminal"](${bbox});node["aeroway"="parking_position"](${bbox});node["aeroway"="gate"](${bbox}););out tags geom;`;
-  const cacheKey = `osm-airport-ground-v3:${bbox}`;
+  const cacheKey = `osm-airport-ground-v4:${bbox}`;
   const result = await loadCachedResource({
     cacheKey,
     ttlMs: 24 * 60 * 60_000,
@@ -157,7 +161,14 @@ export async function loadOsmAirportGround(bounds: AirportGroundBounds, signal?:
       let lastError = new Error("OSM 机场地面数据加载失败");
       for (const endpoint of endpoints) {
         try {
-          const payload = await fetchJsonWithRetry<OverpassResponse>(`${endpoint}?data=${encodeURIComponent(query)}`, { signal: requestSignal, timeoutMs: 20_000, retries: 0, headers: { Accept: "application/json" } });
+          const payload = await fetchJsonWithRetry<OverpassResponse>(endpoint, {
+            signal: requestSignal,
+            timeoutMs: 20_000,
+            retries: 0,
+            method: "POST",
+            headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+            body: new URLSearchParams({ data: query }),
+          });
           return { type: "FeatureCollection" as const, features: (payload.elements ?? []).flatMap((element) => asFeature(element)) };
         } catch (error) {
           if (requestSignal.aborted) throw error;

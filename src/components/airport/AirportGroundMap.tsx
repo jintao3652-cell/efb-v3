@@ -27,6 +27,8 @@ export function AirportGroundMap({ airport, data, selectedStand, onSelectStand }
   const [mapReady, setMapReady] = useState(false);
   const airportGroundBounds = useMemo(() => normalizeAirportGroundBounds({ west: airport.longitude - .12, south: airport.latitude - .12, east: airport.longitude + .12, north: airport.latitude + .12 }), [airport.latitude, airport.longitude]);
   const osmGround = useQuery({ queryKey: ["airport-detail-osm-ground", airportGroundBounds], queryFn: ({ signal }) => loadOsmAirportGround(airportGroundBounds, signal), staleTime: 30 * 60_000, retry: 0, networkMode: "always" });
+  const osmTaxiwayCount = osmGround.data?.features.filter((feature) => feature.properties.kind === "taxiway" || feature.properties.kind === "taxilane").length ?? 0;
+  const osmStandCount = osmGround.data?.features.filter((feature) => feature.properties.kind === "parking_position" || feature.properties.kind === "gate").length ?? 0;
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -98,5 +100,7 @@ export function AirportGroundMap({ airport, data, selectedStand, onSelectStand }
     if (map.current?.getLayer("airport-gates")) map.current.setPaintProperty("airport-gates", "circle-color", ["case", ["==", ["get", "ref"], selectedStand], "#ffbd62", "#12d99b"]);
   }, [selectedStand]);
 
-  return <div className="ground-map"><div className="ground-map-header"><div><strong>{airport.icao} 机位、跑道与滑行道</strong><span>XFlySim 跑道/机位 · OpenStreetMap 地面设施 · 放大后显示详细编号</span></div><span>{osmGround.isFetching ? "正在加载地面设施" : selectedStand ? `已选择：${selectedStand}` : `${data?.gates.length ?? 0} 个机位`}</span></div><div className="airport-ground-canvas" ref={container} /><div className="ground-map-legend"><span><i className="stand-symbol" />XFlySim 机位</span><span><i className="osm-stand-symbol" />OSM 机位</span><span><i className="stand-symbol selected" />当前选择</span><span><i className="runway-line-symbol" />跑道</span><span><i className="line-symbol" />滑行道</span><span><i className="apron-symbol" />机坪/航站楼</span><span>RW：跑道 · 字母/数字：滑行道</span></div></div>;
+  const groundStatus = osmGround.isFetching ? "正在加载 OSM 地面设施" : osmGround.isError ? "OSM 滑行道加载失败" : selectedStand ? `已选择：${selectedStand}` : `${osmTaxiwayCount} 段滑行道 · ${osmStandCount} 个 OSM 机位`;
+
+  return <div className="ground-map"><div className="ground-map-header"><div><strong>{airport.icao} 机位、跑道与滑行道</strong><span>XFlySim 跑道/机位 · OpenStreetMap 地面设施 · 放大后显示详细编号</span></div><span>{groundStatus}</span></div>{osmGround.isError && <p className="chartfox-state error">无法读取 OpenStreetMap 滑行道数据：{osmGround.error.message}</p>}<div className="airport-ground-canvas" ref={container} /><div className="ground-map-legend"><span><i className="stand-symbol" />XFlySim 机位</span><span><i className="osm-stand-symbol" />OSM 机位</span><span><i className="stand-symbol selected" />当前选择</span><span><i className="runway-line-symbol" />跑道</span><span><i className="line-symbol" />滑行道</span><span><i className="apron-symbol" />机坪/航站楼</span><span>RW：跑道 · 字母/数字：滑行道</span></div></div>;
 }
