@@ -70,10 +70,15 @@ type ChartMetadataIndex = HashMap<(String, String), ChartMetadata>;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalChartIndex {
+    /// 解析规则版本：规则变化后 +1，让旧索引自动失效重扫。
+    #[serde(default)]
+    version: u32,
     path: String,
     source_type: LocalChartSourceType,
     charts: Vec<LocalChart>,
 }
+
+const INDEX_VERSION: u32 = 2;
 
 static LOCAL_CHART_INDEX: OnceLock<Mutex<Option<LocalChartIndex>>> = OnceLock::new();
 
@@ -123,7 +128,7 @@ fn write_library_config(config: &LocalChartLibraryConfig) -> Result<(), String> 
 }
 
 fn index_matches(index: &LocalChartIndex, config: &LocalChartLibraryConfig) -> bool {
-    index.path == config.path && index.source_type == config.source_type
+    index.version == INDEX_VERSION && index.path == config.path && index.source_type == config.source_type
 }
 
 fn read_library_index(config: &LocalChartLibraryConfig) -> Option<Vec<LocalChart>> {
@@ -150,6 +155,7 @@ fn write_library_index(
     charts: &[LocalChart],
 ) -> Result<(), String> {
     let index = LocalChartIndex {
+        version: INDEX_VERSION,
         path: config.path.clone(),
         source_type: config.source_type.clone(),
         charts: charts.to_vec(),
@@ -193,6 +199,11 @@ fn airport_icao(value: &str) -> Option<String> {
 
 fn chart_category(name: &str) -> String {
     let name = name.to_uppercase();
+    // 「精密进近地形图」属于机场障碍物图族，只是名字里带「进近」，
+    // 必须先于进近规则排除，否则会被误分类为进场。
+    if name.contains("精密进近地形") {
+        return "机场".to_string();
+    }
     if name.contains("标准仪表离场") || name.contains("SID") || name.contains("DEP") {
         "离场".to_string()
     } else if name.contains("标准仪表进场")
@@ -240,7 +251,11 @@ fn decode_chart_csv(bytes: &[u8]) -> String {
     text.trim_start_matches('\u{feff}').to_string()
 }
 
-fn chart_metadata_from_bytes(bytes: &[u8]) -> ChartMetadataIndex {
+/// 解析一份 Charts.csv。NAIP 数据的 `<ICAO>/Charts.csv` **没有 AirportIcao 列**
+/// （表头为 ChartName,PAGE_NUMBER,ChartTypeEx_CH,IS_SUP,IsModify），
+/// 此时机场码由所在文件夹名通过 `default_airport` 传入；带 AirportIcao 列的
+/// 数据集仍按行内值优先。
+fn chart_metadata_from_bytes(bytes: &[u8], default_airport: Option<&str>) -> ChartMetadataIndex {
     let text = decode_chart_csv(bytes);
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
@@ -251,7 +266,9 @@ fn chart_metadata_from_bytes(bytes: &[u8]) -> ChartMetadataIndex {
         .deserialize::<ChartCsvRecord>()
         .filter_map(Result::ok)
     {
-        let Some(airport) = airport_icao(&record.airport) else {
+        let airport = airport_icao(&record.airport)
+            .or_else(|| default_airport.and_then(airport_icao));
+        let Some(airport) = airport else {
             continue;
         };
         let item = ChartMetadata {
@@ -269,12 +286,17 @@ fn chart_metadata_from_bytes(bytes: &[u8]) -> ChartMetadataIndex {
     metadata
 }
 
-fn extend_folder_metadata(metadata: &mut ChartMetadataIndex, path: &Path) -> Result<(), String> {
+fn extend_folder_metadata(
+    metadata: &mut ChartMetadataIndex,
+    path: &Path,
+    default_airport: Option<&str>,
+) -> Result<(), String> {
     if !path.is_file() {
         return Ok(());
     }
     metadata.extend(chart_metadata_from_bytes(
         &fs::read(path).map_err(|error| error.to_string())?,
+        default_airport,
     ));
     Ok(())
 }
@@ -282,13 +304,18 @@ fn extend_folder_metadata(metadata: &mut ChartMetadataIndex, path: &Path) -> Res
 fn folder_chart_metadata(terminals: &Path) -> Result<ChartMetadataIndex, String> {
     let mut metadata = ChartMetadataIndex::new();
     if let Some(parent) = terminals.parent() {
-        extend_folder_metadata(&mut metadata, &parent.join("Charts.csv"))?;
+        extend_folder_metadata(&mut metadata, &parent.join("Charts.csv"), None)?;
     }
-    extend_folder_metadata(&mut metadata, &terminals.join("Charts.csv"))?;
+    extend_folder_metadata(&mut metadata, &terminals.join("Charts.csv"), None)?;
     for entry in fs::read_dir(terminals).map_err(|error| error.to_string())? {
         let path = entry.map_err(|error| error.to_string())?.path();
         if path.is_dir() {
-            extend_folder_metadata(&mut metadata, &path.join("Charts.csv"))?;
+            // 每个机场文件夹自己的 Charts.csv 不带 AirportIcao 列，机场码取文件夹名。
+            let folder = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            extend_folder_metadata(&mut metadata, &path.join("Charts.csv"), Some(folder))?;
         }
     }
     Ok(metadata)
@@ -345,12 +372,21 @@ fn local_chart(
         } else {
             format!("{airport}-{}", item.page_number)
         };
-        let title = if item.title.is_empty() || item.title.eq_ignore_ascii_case(&document_name) {
-            document_name
+        // 标题优先显示 ChartTypeEx_CH（如「标准仪表进场图」「仪表进近图_ILS」），
+        // 其次 ChartName，都没有才退回文件名。
+        let title = if !item.chart_type.is_empty() {
+            item.chart_type.clone()
+        } else if !item.title.is_empty() && !item.title.eq_ignore_ascii_case(&document_name) {
+            item.title.clone()
         } else {
-            format!("{document_name} · {}", item.title)
+            document_name
         };
-        let revision = chart_type_label(&item.chart_type);
+        // revision 放航图编号（PAGE_NUMBER，如 0C-01），比重复的类型文字更有辨识度。
+        let revision = if item.page_number.is_empty() {
+            chart_type_label(&item.chart_type)
+        } else {
+            item.page_number.clone()
+        };
         return LocalChart {
             id,
             airport,
@@ -456,11 +492,18 @@ fn zip_charts(path: &Path) -> Result<Vec<LocalChart>, String> {
     }
     for index in metadata_entries {
         let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        // `<ICAO>/Charts.csv` 缺 AirportIcao 列，机场码取倒数第二级目录名。
+        let entry_path = entry.name().replace('\\', "/");
+        let parts = entry_path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let default_airport = parts.len().checked_sub(2).and_then(|position| parts.get(position).copied());
         let mut bytes = Vec::new();
         entry
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
-        metadata.extend(chart_metadata_from_bytes(&bytes));
+        metadata.extend(chart_metadata_from_bytes(&bytes, default_airport));
     }
     let mut charts = Vec::new();
     for index in 0..archive.len() {

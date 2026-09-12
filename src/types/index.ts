@@ -3,6 +3,14 @@ export interface FlightRoutePoint {
   name: string;
   latitude: number;
   longitude: number;
+  /** ARINC 424 航段类型（TF/CF/DF/RF/CA/CR…），来自 Fenix TerminalLegs.TrackCode */
+  legType?: string;
+  /** RF（Radius to Fix）圆弧圆心 (lat, lon)：与上一点之间画圆弧 */
+  arcCenter?: [number, number];
+  /** 纯航向腿（CA/CR/CD/VA/VI…）的航向角 */
+  course?: number;
+  /** true = 由航向外推出的展示点（非真实航路点），画虚线、不画标记 */
+  courseOnly?: boolean;
 }
 
 export interface FlightProcedureSelection {

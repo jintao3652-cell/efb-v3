@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CloudSun, ExternalLink, RefreshCw, TriangleAlert } from "lucide-react";
 import { getWeather, isTauri } from "../lib/tauri";
-import { useAppStore } from "../stores/app-store";
 
 function providerName(source: string) {
   if (source === "中国气象局航空气象") return source;
@@ -13,11 +12,10 @@ function providerName(source: string) {
 
 export function WeatherPage() {
   const [station, setStation] = useState("ZBAA");
-  const online = useAppStore((state) => state.online);
   const normalizedStation = station.trim().toUpperCase();
   const weather = useQuery({
-    queryKey: ["weather", normalizedStation, online],
-    queryFn: () => getWeather(normalizedStation, !online),
+    queryKey: ["weather", normalizedStation],
+    queryFn: () => getWeather(normalizedStation),
     enabled: isTauri() && normalizedStation.length === 4,
     retry: 0,
     staleTime: 60_000,
@@ -27,7 +25,6 @@ export function WeatherPage() {
 
   return <div className="weather-page page-stack">
     <div className="page-actions"><div><h2>天气与通告</h2><p>METAR / TAF 按机场缓存；网络失败时仅回退该 ICAO 的最近数据。</p></div><div className="station-input"><input value={station} maxLength={4} onChange={(event) => setStation(event.target.value.toUpperCase())} /><button className="button primary" onClick={() => weather.refetch()} disabled={normalizedStation.length !== 4 || weather.isFetching}><RefreshCw size={16} className={weather.isFetching ? "spinning" : ""} />刷新</button></div></div>
-    {!online && <div className="offline-banner"><TriangleAlert size={18} />当前离线，将尝试读取 {normalizedStation || "该机场"} 的最近本地缓存。</div>}
     {weather.isError && !report && <div className="notice"><TriangleAlert size={18} /><div><strong>无法加载 {normalizedStation} 天气</strong><p>{weather.error.message}</p></div></div>}
     {!isTauri() && <div className="notice"><TriangleAlert size={18} /><div><strong>天气服务需要桌面应用</strong><p>浏览器开发模式不会显示虚构或其他机场的缓存数据。</p></div></div>}
     {report && <>

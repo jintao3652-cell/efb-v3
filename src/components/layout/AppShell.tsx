@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  Bell, BookOpen, ChevronLeft, ChevronRight, CloudSun, Compass, Gauge, Map, Menu, Moon, Plane, Settings, Sun, Wifi, WifiOff,
+  Bell, BookOpen, ChevronLeft, ChevronRight, CloudSun, Compass, Gauge, Map, Menu, Moon, Plane, Settings, Sun,
 } from "lucide-react";
 import { useAppStore } from "../../stores/app-store";
 
@@ -15,15 +15,8 @@ const navigation = [
 ];
 
 export function AppShell() {
-  const { sidebarCollapsed, toggleSidebar, theme, online, setOnline, setTheme } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, theme, setTheme } = useAppStore();
   const location = useLocation();
-
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => { window.removeEventListener("online", update); window.removeEventListener("offline", update); };
-  }, [setOnline]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
 
@@ -46,7 +39,6 @@ export function AppShell() {
         <button className="icon-button mobile-menu" onClick={toggleSidebar} aria-label="导航菜单"><Menu size={21} /></button>
         <div><p className="eyebrow">ELECTRONIC FLIGHT BAG</p><h1>{title}</h1></div>
         <div className="topbar-actions">
-          <div className={`connection ${online ? "online" : "offline"}`}>{online ? <Wifi size={15} /> : <WifiOff size={15} />}<span>{online ? "在线" : "离线缓存"}</span></div>
           <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={theme === "dark" ? "切换为白色页面" : "切换为深色页面"} title={theme === "dark" ? "切换为白色页面" : "切换为深色页面"}>
             {theme === "dark" ? <><Sun size={17} /><span>白色页面</span></> : <><Moon size={17} /><span>深色页面</span></>}
           </button>

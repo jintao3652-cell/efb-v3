@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>导入即激活 — 去掉二次确认</title>
+<style>
+  :root {
+    --bg: #07111f; --panel: #0e1c28; --panel2: #101d27; --line: #24455e;
+    --fg: #dcecf4; --dim: #8fb0c4; --accent: #4fc3f7; --ok: #4ade80; --bad: #ff7b72; --warn: #f0c674;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 40px 60px; background: var(--bg); color: var(--fg);
+    font: 15px/1.75 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 25px; margin: 0 0 6px; letter-spacing: .3px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 28px; }
+  h2 { font-size: 17px; margin: 36px 0 12px; padding-left: 11px; border-left: 3px solid var(--accent); }
+  p { margin: 10px 0; color: #c8dbe6; }
+  code, pre { font-family: Consolas, "Cascadia Mono", monospace; }
+  code { background: #16283a; border: 1px solid #23394d; border-radius: 4px; padding: 1px 6px; font-size: 13px; color: #a8d8f0; }
+  pre { background: #0a1723; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.65; color: #cfe3ed; }
+  pre .c { color: #5f7d92; } pre .g { color: var(--ok); } pre .r { color: var(--bad); } pre .y { color: var(--warn); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 14px 0; }
+  .chain { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .chain li { position: relative; padding: 9px 0 9px 42px; border-bottom: 1px dashed #1e3549; font-size: 14px; color: #c8dbe6; }
+  .chain li:last-child { border-bottom: none; }
+  .chain li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 10px;
+    width: 24px; height: 24px; border-radius: 50%; background: #17334a; color: var(--accent);
+    font: 700 12px/24px Consolas, monospace; text-align: center; }
+  .chain li.hot::before { background: #4a1f22; color: var(--bad); }
+  .chain li.hot { color: #ffd9d6; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid #1e3549; }
+  th { background: #12293c; color: #a8d8f0; font-weight: 700; font-size: 12.5px; letter-spacing: .4px; }
+  td.mono { font-family: Consolas, monospace; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; color: #a8d8f0; letter-spacing: .4px; }
+  .card ul { margin: 0; padding-left: 18px; font-size: 13px; color: #c8dbe6; }
+  .card li { margin: 4px 0; }
+  img { width: 100%; border: 1px solid var(--line); border-radius: 10px; margin: 8px 0 4px; }
+  .cap { color: var(--dim); font-size: 12px; }
+  .foot { margin-top: 40px; padding-top: 16px; border-top: 1px solid #1e3549; color: #6d8ba0; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>导入即激活 — 去掉「再点一次确认」</h1>
+<div class="sub">飞行计划页 · 2026-09-11 · 涉及 <code>FlightPlansPage.tsx</code> / <code>route-procedures.ts</code> / <code>styles.css</code></div>
+
+<h2>需求</h2>
+<div class="panel">
+  <p style="margin:0">「在导入计划后直接激活导入的计划，不要让用户再手动点一次确认。」</p>
+</div>
+<p>原流程里有两处多余的点击：点历史计划会弹一个原生确认框（<code>window.confirm</code>，
+文案正是「确认将 … 导入为当前飞行计划？」），导入 SimBrief 后也没有把计划真正交到手上。</p>
+
+<h2>激活机制（先弄清它是什么，再改）</h2>
+<p>地图侧当前计划不是存出来的一个「active」标志，而是<strong>约定</strong>：</p>
+<pre><span class="c">// src/pages/MapPage.tsx</span>
+const activePlan = flightPlans.data?.[0];
+
+<span class="c">// src-tauri/src/commands/flightplan.rs</span>
+SELECT … FROM flight_plans <span class="y">ORDER BY imported_at DESC, updated_at DESC</span></pre>
+<p>也就是说：<strong>激活 = 把这条计划的 <code>imported_at</code> 刷新成当前时间</strong>，
+它就会排到列表第一条，地图随之切换航路。原有的「导入」流程其实已经写了新的
+<code>importedAt</code>，所以它本来就该生效 —— 真正挡在中间的是那个确认框。</p>
+
+<h2>改动</h2>
+<table>
+  <tr><th>位置</th><th>改动</th><th>效果</th></tr>
+  <tr>
+    <td class="mono">FlightPlansPage.tsx</td>
+    <td>删掉 <code>activatePlan</code> 里的 <code>window.confirm</code></td>
+    <td>点历史计划<span class="ok">直接激活</span></td>
+  </tr>
+  <tr>
+    <td class="mono">FlightPlansPage.tsx</td>
+    <td>导入 SimBrief 成功后写入 <code>flight-plans</code> 查询缓存 + 给出「已导入并直接设为当前飞行计划」提示</td>
+    <td>导入完<span class="ok">地图立刻换航路</span>，无需再点</td>
+  </tr>
+  <tr>
+    <td class="mono">route-procedures.ts</td>
+    <td>新增 <code>detectPlanRouteProcedures(plan, lookup)</code>：落库前按航路补齐 SID/STAR、跑道与航迹点</td>
+    <td>激活的航迹<span class="ok">一次到位</span>（见下节）</td>
+  </tr>
+  <tr>
+    <td class="mono">FlightPlansPage.tsx</td>
+    <td>页面文案改为「导入 SimBrief 或点击历史计划即刻切换为当前地图航路，无需二次确认」；列表首行加「当前」徽标 + 高亮</td>
+    <td>没有确认框后，仍能一眼看出<span class="ok">哪条在生效</span></td>
+  </tr>
+</table>
+
+<h2>为什么不能只删确认框</h2>
+<p>这是本次改动里最容易被忽略的一环。终端程序的识别原本只发生在<strong>编辑器组件</strong>里
+（打开编辑计划 → 读到程序表 → 自动补 SID/STAR），而补出来的值要按「保存」才落库。
+于是「导入后不打开编辑器」的计划，数据库里就是干干净净的：</p>
+<pre><span class="c">-- 用户真实计划（改动前实测）</span>
+callsign: DLH106 | EDDF -> EDDM
+route   : CIND8S CINDY Z74 HAREM T104 ROKIL ROKI1B
+sid     : <span class="r">NULL</span>      star: <span class="r">NULL</span>      rwy: <span class="r">None / None</span></pre>
+<p>如果只是「自动激活」，用户拿到的会是一条<strong>没有离场/进场航迹</strong>的计划 —— 上一轮刚修好的
+SID/STAR 识别又白做了。所以补齐逻辑被抽成纯函数，<strong>导入与激活两条路径都在落库前调用它</strong>：</p>
+<pre><span class="c">// src/lib/route-procedures.ts（可注入查库入口，便于脱离 Tauri 验证）</span>
+export interface ProcedureLookup {
+  procedures: (icao: string) =&gt; Promise&lt;NavigationAirportProcedures&gt;;
+  points: (procedureId: number, runway: string, transition: string) =&gt; Promise&lt;FlightRoutePoint[]&gt;;
+}
+export async function detectPlanRouteProcedures(plan: FlightPlan, lookup: ProcedureLookup): Promise&lt;FlightPlan&gt;</pre>
+<div class="grid2">
+  <div class="card">
+    <h3>行为约定</h3>
+    <ul>
+      <li>只补<strong>空字段</strong> —— 手动选过的 SID/STAR 与跑道绝不覆盖</li>
+      <li>取点用<strong>刚定下的跑道</strong>：ROKI1B 这类 STAR 的 leg 按跑道过渡编码，跑道留空会返回 0 个点</li>
+      <li>匹配不上就什么都不做，不猜</li>
+      <li>任一步失败原样返回计划，<strong>不阻断导入</strong></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>清理</h3>
+    <ul>
+      <li><code>procedureSelection</code> / <code>procedureSupportsRunway</code> / <code>validAirportIcao</code>
+          从页面移到 lib，手动选择、编辑器自动识别、导入补齐<strong>三处共用一份</strong>，不再各写一份</li>
+      <li>编辑器行为不变</li>
+    </ul>
+  </div>
+</div>
+
+<h2>验证</h2>
+<p>跑的是<strong>编译出来的真实模块</strong>，查库入口接到按 <code>navigation.rs</code> 逐行复刻的
+Python 查询（真实 <code>nd.db3</code>），输入是应用数据库里那条真实计划（<code>sid</code>/<code>star</code>/跑道全空）：</p>
+<pre>PASS  识别出 SID = CIND8S            PASS  SID 有可绘制点  -&gt; <span class="g">7 个点</span>
+PASS  识别出 STAR = ROKI1B            PASS  SID 末点接上航路首点 CINDY
+PASS  起飞跑道定为 18                  PASS  STAR 有可绘制点 -&gt; <span class="g">2 个点</span>
+PASS  落地跑道定为 26L                 PASS  STAR 首点接上航路末点 ROKIL
+PASS  航路点未被破坏（13 个）
+PASS  自动定下的跑道能取到点 -&gt; RWY 26L 2 个点
+PASS  跑道留空则取不到点 -&gt; <span class="y">0 个点</span>（所以必须先定跑道）
+PASS  再次运行不改变已有 SID/STAR      PASS  手动填的 SID 优先级高于自动识别 -&gt; MANUAL1 / 07C
+PASS  首 token 是航路点时误判 SID     PASS  单 token 且只在场站 STAR 表里 → 不当作 SID
+PASS  非四字代码不查库                 PASS  查库抛错时原样返回计划
+PASS  查库失败后不再尝试取点           PASS  查库失败仍照常问过两个机场
+
+<span class="g">21/21 通过，共 19 次真实查库</span>
+识别结果：SID CIND8S (RWY 18, 7 点) → 航路 13 点 → STAR ROKI1B (RWY 26L, 2 点)</pre>
+<p>另有 <code>tsc -b</code> 0 error、<code>vite build</code> 成功（FlightPlansPage 22.22 kB / gzip 7.23 kB）。</p>
+
+<h2>界面</h2>
+<p>用真实 <code>styles.css</code> 在无头 Chrome 里渲染同一套行结构，确认「当前」徽标不挤占航司名、不越界：</p>
+<img src="plan-activation-rows.png" alt="飞行计划列表：首行带「当前」徽标">
+<div class="cap">徽标 10px、行内显示（<code>getClientRects().length === 1</code>）、未越出所在列；高亮行数 1。</div>
+
+<h2>待确认</h2>
+<ul>
+  <li>界面表现只在无头 Chrome 的静态复刻里看过，<strong>没有在运行的应用里真实点过</strong> ——
+      数据层与构建全绿不等于交互正确。</li>
+  <li>导入成功后仍会打开计划编辑器（便于核对 SID/STAR），此时计划已经激活。
+      若希望导入后连编辑器也不弹，可以再去掉这一步。</li>
+</ul>
+
+<div class="foot">EFB V3 · 文档与验证脚本均为本地产物 · 识别与查询逻辑照抄后端，未另写一套</div>
+
+</body>
+</html>

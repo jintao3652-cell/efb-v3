@@ -31,6 +31,18 @@ pub struct FlightRoutePoint {
     pub name: String,
     pub latitude: f64,
     pub longitude: f64,
+    /// ARINC 424 航段类型（Fenix TerminalLegs.TrackCode）：TF/CF/DF/RF/CA/CR…
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leg_type: Option<String>,
+    /// RF（Radius to Fix）圆弧的圆心 (lat, lon)；前端据此把 prev→该点画成圆弧。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc_center: Option<(f64, f64)>,
+    /// 纯航向腿（CA/CD/CR/VA/VI 等无终点坐标）的磁航向；展示点按航向外推 6 NM。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub course: Option<f64>,
+    /// true = 该点是按航向外推的展示点（并非真实航路点），前端画虚线且不画标记。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub course_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

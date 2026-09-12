@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Download, FileText, FileUp, Gauge, Plane, PlaneLanding, PlaneTakeoff, Plus, Route, Save, UserRound, X } from "lucide-react";
 import { flightPlanTemplate } from "../lib/data";
 import { getNavigationAirportProcedures, getNavigationProcedurePoints, importSimBriefFlight, listFlightPlans, saveFlightPlan, type NavigationProcedureSummary } from "../lib/tauri";
+import { detectPlanRouteProceduresDetailed, detectRouteProcedures, procedureSelection, procedureSupportsRunway, validAirportIcao, type ProcedureLookup } from "../lib/route-procedures";
 import { updateFlightPlan } from "../stores/flight-plan-store";
 import type { FlightPlan, FlightProcedureSelection, FlightRoutePoint } from "../types";
 
@@ -15,10 +16,16 @@ function savedSimbriefUsername() { try { return localStorage.getItem(simbriefUse
 function cacheSimbriefUsername(username: string) { try { localStorage.setItem(simbriefUsernameKey, username); } catch { return; } }
 function localDateTime(value: string) { const timestamp = Date.parse(value); return Number.isNaN(timestamp) ? new Date().toISOString().slice(0, 16) : new Date(timestamp).toISOString().slice(0, 16); }
 function downloadPlan(plan: FlightPlan) { const url = URL.createObjectURL(new Blob([JSON.stringify(plan, null, 2)], { type: "application/json" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${plan.callsign || plan.departure}-${plan.arrival}.json`; anchor.click(); URL.revokeObjectURL(url); }
-function validAirportIcao(value: string) { return /^[A-Z0-9]{4}$/.test(value.trim().toUpperCase()); }
 function sameRoutePoints(first: FlightRoutePoint[], second: FlightRoutePoint[]) { return first.length === second.length && first.every((point, index) => point.ident === second[index].ident && Math.abs(point.latitude - second[index].latitude) < .000001 && Math.abs(point.longitude - second[index].longitude) < .000001); }
-function procedureSupportsRunway(procedure: NavigationProcedureSummary, runway: string) { return !runway || procedure.runways.length === 0 || procedure.runways.includes(runway); }
 function procedureRunways(procedures: NavigationProcedureSummary[], current: string) { const values = new Set(procedures.flatMap((procedure) => procedure.runways)); if (current) values.add(current); return [...values].sort((first, second) => first.localeCompare(second, undefined, { numeric: true })); }
+/** 查库入口绑定到 Tauri 命令；识别/取点的纯逻辑在 lib/route-procedures.ts，便于脱离应用验证。 */
+const procedureLookup: ProcedureLookup = {
+  procedures: (icao) => getNavigationAirportProcedures(icao),
+  points: (procedureId, runway, transition) => getNavigationProcedurePoints(procedureId, runway, transition),
+};
+/** 导入与激活共用的「补齐终端程序」入口；失败原因随结果返回，由调用方展示 —— 绝不静默。 */
+function detectPlanProcedures(plan: FlightPlan) { return detectPlanRouteProceduresDetailed(plan, procedureLookup); }
+function describeDetectionIssues(issues: string[]) { return issues.length ? `⚠ ${issues.join("；")}` : "进离场程序已自动识别。"; }
 function syncFlightPlanPanel(plan: FlightPlan) {
   updateFlightPlan({
     callsign: plan.callsign,
@@ -36,17 +43,25 @@ export function FlightPlansPage() {
   const [simbriefOpen, setSimbriefOpen] = useState(false);
   const [username, setUsername] = useState(savedSimbriefUsername);
   const [activationMessage, setActivationMessage] = useState("");
+  // 最近一次「补齐终端程序」的过程问题（识别不到、查库失败等），由激活提示语展示
+  const detectionIssuesRef = useRef<string[]>([]);
   const plans = useMemo(() => plansQuery.data ?? [], [plansQuery.data]);
   useEffect(() => { if (!plansQuery.isLoading && plans.length === 0) { setEditingMode("edit"); setEditing(newPlan()); } }, [plansQuery.isLoading, plans.length]);
   const mutation = useMutation({ mutationFn: async (plan: FlightPlan) => { const result = await saveFlightPlan(plan); cachePlans([result, ...plans.filter((item) => item.id !== result.id)]); return result; }, onSuccess: (plan) => { syncFlightPlanPanel(plan); client.invalidateQueries({ queryKey: ["flight-plans"] }); setEditing(null); } });
-  const simbriefMutation = useMutation({ mutationFn: async (username: string) => { const flight = await importSimBriefFlight(username.trim()); const importedAt = new Date().toISOString(); return saveFlightPlan({ id: crypto.randomUUID(), callsign: flight.callsign, departure: flight.departure, arrival: flight.arrival, alternate: flight.alternate, route: flight.route, aircraft: flight.aircraft, cruiseAltitude: flight.cruiseAltitude, etd: localDateTime(flight.scheduledOut), updatedAt: importedAt, importedAt, routePoints: flight.routePoints }); }, onSuccess: (plan, importedUsername) => { const cachedUsername = importedUsername.trim(); cacheSimbriefUsername(cachedUsername); setUsername(cachedUsername); syncFlightPlanPanel(plan); cachePlans([plan, ...plans.filter((item) => item.id !== plan.id)]); client.invalidateQueries({ queryKey: ["flight-plans"] }); setEditingMode("edit"); setEditing(plan); setSimbriefOpen(false); } });
-  const activateMutation = useMutation({ mutationFn: async (plan: FlightPlan) => { const importedAt = new Date().toISOString(); return saveFlightPlan({ ...plan, updatedAt: importedAt, importedAt }); }, onSuccess: (plan) => { const updatedPlans = [plan, ...plans.filter((item) => item.id !== plan.id)]; syncFlightPlanPanel(plan); cachePlans(updatedPlans); client.setQueryData(["flight-plans"], updatedPlans); client.invalidateQueries({ queryKey: ["flight-plans"] }); setActivationMessage(`已导入 ${plan.callsign || `${plan.departure}-${plan.arrival}`}，地图航路已切换。`); } });
-  const activatePlan = (plan: FlightPlan) => { if (window.confirm(`确认将 ${plan.callsign || "此计划"}（${plan.departure} → ${plan.arrival}）导入为当前飞行计划？`)) activateMutation.mutate(plan); };
+  // 导入即激活：计划落库时就带上刚识别出的 SID/STAR 与航迹点，
+  // 且 importedAt 取当前时间 —— 列表按 importedAt 倒序，这张计划自然成为
+  // 地图侧的 activePlan，不需要用户再去列表里点一次。
+  const simbriefMutation = useMutation({ mutationFn: async (username: string) => { const flight = await importSimBriefFlight(username.trim()); const importedAt = new Date().toISOString(); const draft: FlightPlan = { id: crypto.randomUUID(), callsign: flight.callsign, departure: flight.departure, arrival: flight.arrival, alternate: flight.alternate, route: flight.route, aircraft: flight.aircraft, cruiseAltitude: flight.cruiseAltitude, etd: localDateTime(flight.scheduledOut), updatedAt: importedAt, importedAt, routePoints: flight.routePoints }; const detection = await detectPlanProcedures(draft); detectionIssuesRef.current = detection.issues; return saveFlightPlan(detection.plan); }, onSuccess: (plan, importedUsername) => { const cachedUsername = importedUsername.trim(); cacheSimbriefUsername(cachedUsername); setUsername(cachedUsername); syncFlightPlanPanel(plan); cachePlans([plan, ...plans.filter((item) => item.id !== plan.id)]); client.setQueryData(["flight-plans"], [plan, ...plans.filter((item) => item.id !== plan.id)]); client.invalidateQueries({ queryKey: ["flight-plans"] }); setActivationMessage(`已导入 ${plan.callsign || `${plan.departure}-${plan.arrival}`}，并直接设为当前飞行计划，地图航路已切换。${describeDetectionIssues(detectionIssuesRef.current)}`); setEditingMode("edit"); setEditing(plan); setSimbriefOpen(false); } });
+  // 激活同样先补齐终端程序：历史计划里常常只存了航路文本（导入时还没识别或当时失败），
+  // 补齐后再落库，避免「点开一条旧计划，地图上却没有离场/进场航迹」。
+  const activateMutation = useMutation({ mutationFn: async (plan: FlightPlan) => { const importedAt = new Date().toISOString(); const detection = await detectPlanProcedures({ ...plan, updatedAt: importedAt, importedAt }); detectionIssuesRef.current = detection.issues; return saveFlightPlan(detection.plan); }, onSuccess: (plan) => { const updatedPlans = [plan, ...plans.filter((item) => item.id !== plan.id)]; syncFlightPlanPanel(plan); cachePlans(updatedPlans); client.setQueryData(["flight-plans"], updatedPlans); client.invalidateQueries({ queryKey: ["flight-plans"] }); setActivationMessage(`已激活 ${plan.callsign || `${plan.departure}-${plan.arrival}`}，地图航路已切换。${describeDetectionIssues(detectionIssuesRef.current)}`); } });
+  // 点击即激活：不再弹确认框，用户点一次就切换到位。
+  const activatePlan = (plan: FlightPlan) => { activateMutation.mutate(plan); };
   const newPlan = (): FlightPlan => { const importedAt = new Date().toISOString(); return { ...flightPlanTemplate, id: crypto.randomUUID(), callsign: "", departure: "ZBAA", arrival: "ZSPD", route: "", etd: new Date().toISOString().slice(0, 16), updatedAt: importedAt, importedAt, routePoints: [], departureRunway: "", arrivalRunway: "", sid: undefined, star: undefined }; };
-  return <div className="flight-page page-stack"><div className="page-actions"><div><h2>飞行计划</h2><p>点击历史计划并确认后可直接切换为当前地图航路。</p></div><div><button className="button secondary" onClick={() => { setSimbriefOpen(true); simbriefMutation.reset(); }}><FileUp size={17} />导入 SimBrief</button><button className="button primary" onClick={() => { setEditingMode("new"); setEditing(newPlan()); }}><Plus size={17} />新建计划</button></div></div>
+  return <div className="flight-page page-stack"><div className="page-actions"><div><h2>飞行计划</h2><p>导入 SimBrief 或点击历史计划即刻切换为当前地图航路，无需二次确认。</p></div><div><button className="button secondary" onClick={() => { setSimbriefOpen(true); simbriefMutation.reset(); }}><FileUp size={17} />导入 SimBrief</button><button className="button primary" onClick={() => { setEditingMode("new"); setEditing(newPlan()); }}><Plus size={17} />新建计划</button></div></div>
     {activationMessage && <p className="success-message">{activationMessage}</p>}
-    <section className="panel plan-table"><div className="plan-table-head"><span>呼号 / 机型</span><span>航线</span><span>计划起飞</span><span>操作</span></div>{plans.map((plan) => <div className="plan-row" role="button" tabIndex={0} onClick={() => activatePlan(plan)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activatePlan(plan); } }} key={plan.id}><span><strong>{plan.callsign || "未命名计划"}</strong><small>{plan.aircraft}</small></span><span><strong>{plan.departure} <i>→</i> {plan.arrival}</strong><small>{plan.route || "未设置航路"}</small></span><span>{new Date(plan.etd).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span><button className="plan-row-edit" onClick={(event) => { event.stopPropagation(); setEditingMode("edit"); setEditing(plan); }}>编辑</button></div>)}</section>
-    {simbriefOpen && <div className="modal-backdrop" role="presentation"><section className="modal-panel simbrief-modal" role="dialog" aria-modal="true" aria-label="导入 SimBrief 飞行计划"><div className="modal-header"><div><p className="eyebrow">SIMBRIEF IMPORT</p><h2>导入最近飞行计划</h2></div><button className="icon-button" onClick={() => setSimbriefOpen(false)}><X size={20} /></button></div><p className="simbrief-description">输入 SimBrief 用户名。应用会通过官方 API 读取该用户最近一次生成的飞行计划，并填充到可编辑草稿。</p><label className="form-field"><span>SimBrief 用户名</span><div className="input-with-icon"><UserRound size={17} /><input autoFocus value={username} onChange={(event) => { setUsername(event.target.value); cacheSimbriefUsername(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter" && username.trim()) simbriefMutation.mutate(username); }} placeholder="例如 your_simbrief_username" /></div></label>{simbriefMutation.isError && <p className="form-error">{simbriefMutation.error.message}</p>}<div className="modal-actions"><button className="button secondary" onClick={() => setSimbriefOpen(false)}>取消</button><button className="button primary" disabled={!username.trim() || simbriefMutation.isPending} onClick={() => simbriefMutation.mutate(username)}><FileUp size={17} />{simbriefMutation.isPending ? "正在导入" : "读取最近 OFP"}</button></div></section></div>}
+    <section className="panel plan-table"><div className="plan-table-head"><span>呼号 / 机型</span><span>航线</span><span>计划起飞</span><span>操作</span></div>{plans.map((plan, index) => <div className={`plan-row${index === 0 ? " plan-row-active" : ""}`} role="button" tabIndex={0} title="点击激活为当前飞行计划" onClick={() => activatePlan(plan)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activatePlan(plan); } }} key={plan.id}><span><strong>{plan.callsign || "未命名计划"}{index === 0 && <em className="plan-row-badge">当前</em>}</strong><small>{plan.aircraft}</small></span><span><strong>{plan.departure} <i>→</i> {plan.arrival}</strong><small>{plan.route || "未设置航路"}</small></span><span>{new Date(plan.etd).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span><button className="plan-row-edit" onClick={(event) => { event.stopPropagation(); setEditingMode("edit"); setEditing(plan); }}>编辑</button></div>)}</section>
+    {simbriefOpen && <div className="modal-backdrop" role="presentation"><section className="modal-panel simbrief-modal" role="dialog" aria-modal="true" aria-label="导入 SimBrief 飞行计划"><div className="modal-header"><div><p className="eyebrow">SIMBRIEF IMPORT</p><h2>导入最近飞行计划</h2></div><button className="icon-button" onClick={() => setSimbriefOpen(false)}><X size={20} /></button></div><p className="simbrief-description">输入 SimBrief 用户名。应用会通过官方 API 读取该用户最近一次生成的飞行计划，自动识别离场/进场程序，并直接激活为当前飞行计划。</p><label className="form-field"><span>SimBrief 用户名</span><div className="input-with-icon"><UserRound size={17} /><input autoFocus value={username} onChange={(event) => { setUsername(event.target.value); cacheSimbriefUsername(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter" && username.trim()) simbriefMutation.mutate(username); }} placeholder="例如 your_simbrief_username" /></div></label>{simbriefMutation.isError && <p className="form-error">{simbriefMutation.error.message}</p>}<div className="modal-actions"><button className="button secondary" onClick={() => setSimbriefOpen(false)}>取消</button><button className="button primary" disabled={!username.trim() || simbriefMutation.isPending} onClick={() => simbriefMutation.mutate(username)}><FileUp size={17} />{simbriefMutation.isPending ? "正在导入" : "读取最近 OFP"}</button></div></section></div>}
     {editing && <FlightPlanEditor plan={editing} mode={editingMode} pending={mutation.isPending} error={mutation.isError ? mutation.error.message : ""} onChange={(update) => setEditing((current) => { const next = current ? update(current) : current; if (next) syncFlightPlanPanel(next); return next; })} onClose={() => setEditing(null)} onExport={() => downloadPlan(editing)} onSubmit={() => mutation.mutate({ ...editing, updatedAt: new Date().toISOString() })} />}
   </div>;
 }
@@ -69,6 +84,36 @@ function FlightPlanEditor({ plan, mode, pending, error, onChange, onClose, onExp
     if (!starPoints.data || !selectedStar) return;
     onChange((current) => !current.star || current.star.name !== selectedStar.name || sameRoutePoints(current.star.points ?? [], starPoints.data!) ? current : { ...current, star: { ...current.star, points: starPoints.data! } });
   }, [onChange, selectedStar, starPoints.data]);
+  // 航路文本里本来就写着离场/进场程序名（SimBrief 的约定：首个元素是 SID、末个元素是 STAR，
+  // 例如 `CIND8S CINDY Z74 HAREM T104 ROKIL ROKI1B`）。导入的计划不会自带 sid/star，
+  // 所以在程序表就绪后按航路自动补一次 —— 只在对应字段为空时补，
+  // 且按 (计划, 航路) 只补一次，绝不覆盖用户的手动选择。
+  const autoDetectedRoutes = useRef("");
+  useEffect(() => {
+    const route = plan.route.trim();
+    if (!route || (plan.sid && plan.star)) return;
+    const routeKey = `${plan.id}|${route}`;
+    if (autoDetectedRoutes.current === routeKey) return;
+    // 程序表还没读回来时 sids/stars 为空数组，此时不做匹配，
+    // 等它们就绪后本 effect 会因为依赖变化再跑一次。
+    const detected = detectRouteProcedures(sids, stars, route);
+    const sid = plan.sid ? undefined : detected.sid;
+    const star = plan.star ? undefined : detected.star;
+    if (!sid && !star) return;
+    autoDetectedRoutes.current = routeKey;
+    onChange((current) => {
+      let updated = current;
+      if (sid && !current.sid) {
+        const { runway, selection } = procedureSelection(sid, current.departureRunway ?? "");
+        updated = { ...updated, departureRunway: runway, sid: selection };
+      }
+      if (star && !current.star) {
+        const { runway, selection } = procedureSelection(star, current.arrivalRunway ?? "");
+        updated = { ...updated, arrivalRunway: runway, star: selection };
+      }
+      return updated;
+    });
+  }, [plan.id, plan.route, plan.sid, plan.star, sids, stars, onChange]);
   const departureRunways = procedureRunways(sids, plan.departureRunway ?? "");
   const arrivalRunways = procedureRunways(stars, plan.arrivalRunway ?? "");
   const availableSids = sids.filter((procedure) => procedureSupportsRunway(procedure, plan.departureRunway ?? ""));
@@ -87,9 +132,7 @@ function FlightPlanEditor({ plan, mode, pending, error, onChange, onClose, onExp
     const procedures = side === "departure" ? sids : stars;
     const procedure = procedures.find((item) => item.name === name);
     if (!procedure) return side === "departure" ? { ...current, sid: undefined } : { ...current, star: undefined };
-    const currentRunway = side === "departure" ? current.departureRunway ?? "" : current.arrivalRunway ?? "";
-    const runway = currentRunway && procedureSupportsRunway(procedure, currentRunway) ? currentRunway : procedure.runways[0] ?? "";
-    const selection: FlightProcedureSelection = { name: procedure.name, transition: procedure.transitions.length === 1 ? procedure.transitions[0] : "", points: [] };
+    const { runway, selection } = procedureSelection(procedure, side === "departure" ? current.departureRunway ?? "" : current.arrivalRunway ?? "");
     return side === "departure" ? { ...current, departureRunway: runway, sid: selection } : { ...current, arrivalRunway: runway, star: selection };
   });
   const updateTransition = (side: "departure" | "arrival", transition: string) => onChange((current) => side === "departure"

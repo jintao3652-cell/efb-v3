@@ -1,5 +1,5 @@
 use super::flightplan::FlightRoutePoint;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, types::ValueRef, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -74,6 +74,7 @@ pub struct NavigationAirportProcedures {
     pub message: String,
     pub sids: Vec<NavigationProcedureSummary>,
     pub stars: Vec<NavigationProcedureSummary>,
+    pub approaches: Vec<NavigationProcedureSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,6 +86,11 @@ pub struct NavigationMapPoint {
     pub iata: String,
     pub kind: String,
     pub symbol: String,
+    /// 报告点类别："compulsory" / "non-compulsory" / "fly-over"
+    /// （Jeppesen ENROUTE-7 图例键 §28）。当前数据源尚无此字段，
+    /// 预留契约：一旦导航库能给出，即可驱动实心/空心与飞越圈符号。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reporting: Option<String>,
     pub latitude: f64,
     pub longitude: f64,
 }
@@ -94,6 +100,9 @@ pub struct NavigationMapPoint {
 pub struct NavigationAirwayLeg {
     pub coordinates: [[f64; 2]; 2],
     pub direction: String,
+    /// 高度层（Fenix AirwayLegs.Level：L=低空 H=高空 B=两者；LNM 数据源为空）。
+    /// Jeppesen 图例 ENRT-L / ENRT-H / ENRT-H/L 对应低空 / 高空 / 双层航路。
+    pub level: String,
     pub minimum_altitude: Option<i64>,
     pub maximum_altitude: Option<i64>,
 }
@@ -115,6 +124,53 @@ pub struct NavigationMapData {
     pub airports: Vec<NavigationMapPoint>,
     pub navaids: Vec<NavigationMapPoint>,
     pub airways: Vec<NavigationAirway>,
+    /// 等待航线（Jeppesen SYMBOLS-8, ROUTES & AIRWAYS — Holding Patterns）。
+    /// 空数组不参与序列化，前端相应图层保持关闭。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub holding_patterns: Vec<NavigationHoldingPattern>,
+    /// Grid MORA 网格单元（Jeppesen ENROUTE-7 §14）。同上，空则不序列化。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub mora_cells: Vec<NavigationMoraCell>,
+    /// 特殊空域面（Jeppesen SYMBOLS-3, AIRSPACE & BOUNDARIES）。同上。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub special_use_airspace: Vec<NavigationSpecialUseAirspace>,
+}
+
+/// 等待航线：跑道形符号 + 入航边。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationHoldingPattern {
+    pub ident: String,
+    pub name: String,
+    /// 入航航向（度，磁航向）
+    pub inbound_course: Option<f64>,
+    /// 转弯方向："L" 左转 / "R" 右转
+    pub turn_direction: Option<String>,
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+/// Grid MORA 网格单元。altitude_feet 为 null 表示图例中的 "Unsurveyed"。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationMoraCell {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub altitude_feet: Option<i64>,
+    /// 精度存疑时前端在数值后加 "±"
+    pub doubtful: bool,
+}
+
+/// 特殊空域面。type 用于归类到 SYMBOLS-3 的绿 / 绛红两族。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationSpecialUseAirspace {
+    pub id: String,
+    pub name: String,
+    pub airspace_type: String,
+    pub lower_limit: Option<String>,
+    pub upper_limit: Option<String>,
+    pub coordinates: Vec<[f64; 2]>,
 }
 
 fn app_directory() -> Result<PathBuf, String> {
@@ -394,6 +450,28 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
+/// 宽容读取整数列。Fenix `nd.db3` 的 `Terminals.Proc` 是 **TEXT**（'1'=STAR、'2'=SID），
+/// 而 rusqlite 的 `row.get::<_, i64>` 只接受 INTEGER 存储，会抛
+/// `Invalid column type Text ... name: Proc`；不同导航库版本又可能存成 INTEGER，
+/// 因此两种存储都兼容。
+fn flexible_column_int(row: &rusqlite::Row<'_>, index: usize, name: &str) -> rusqlite::Result<i64> {
+    match row.get_ref(index)? {
+        ValueRef::Integer(value) => Ok(value),
+        ValueRef::Real(value) => Ok(value as i64),
+        ValueRef::Text(text) => std::str::from_utf8(text)
+            .ok()
+            .and_then(|text| text.trim().parse::<i64>().ok())
+            .ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    index,
+                    rusqlite::types::Type::Text,
+                    format!("列 {name} 的值不是合法整数").into(),
+                )
+            }),
+        ValueRef::Blob(_) | ValueRef::Null => Ok(0),
+    }
+}
+
 fn airport_procedures(
     connection: &Connection,
     icao: &str,
@@ -401,15 +479,17 @@ fn airport_procedures(
     (
         Vec<NavigationProcedureSummary>,
         Vec<NavigationProcedureSummary>,
+        Vec<NavigationProcedureSummary>,
     ),
     String,
 > {
-    let mut statement = connection.prepare("SELECT terminal.ID, terminal.Proc, terminal.Name, COALESCE(terminal.Rwy, ''), COALESCE(leg.Transition, '') FROM Terminals AS terminal LEFT JOIN TerminalLegs AS leg ON leg.TerminalID = terminal.ID WHERE UPPER(terminal.ICAO) = ?1 AND terminal.Proc IN (1, 2) ORDER BY terminal.Proc, terminal.Name, terminal.ID, leg.ID").map_err(|error| error.to_string())?;
+    // Fenix Terminals.Proc：'1'=STAR、'2'=SID、'3'=进近（TEXT 存储，flexible_column_int 兼容）。
+    let mut statement = connection.prepare("SELECT terminal.ID, terminal.Proc, terminal.Name, COALESCE(terminal.Rwy, ''), COALESCE(leg.Transition, '') FROM Terminals AS terminal LEFT JOIN TerminalLegs AS leg ON leg.TerminalID = terminal.ID WHERE UPPER(terminal.ICAO) = ?1 AND terminal.Proc IN (1, 2, 3) ORDER BY terminal.Proc, terminal.Name, terminal.ID, leg.ID").map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![icao.trim().to_uppercase()], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
+                flexible_column_int(row, 1, "Proc")?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
@@ -458,12 +538,17 @@ fn airport_procedures(
         .filter(|(procedure_type, _)| *procedure_type == 2)
         .map(|(_, summary)| summary.clone())
         .collect();
+    let approaches = procedures
+        .iter()
+        .filter(|(procedure_type, _)| *procedure_type == 3)
+        .map(|(_, summary)| summary.clone())
+        .collect();
     let stars = procedures
         .into_iter()
         .filter(|(procedure_type, _)| *procedure_type == 1)
         .map(|(_, summary)| summary)
         .collect();
-    Ok((sids, stars))
+    Ok((sids, stars, approaches))
 }
 
 fn same_route_position(first: &FlightRoutePoint, second: &FlightRoutePoint) -> bool {
@@ -481,15 +566,15 @@ fn procedure_points(
         .query_row(
             "SELECT Proc FROM Terminals WHERE ID = ?1",
             params![procedure_id],
-            |row| row.get::<_, i64>(0),
+            |row| flexible_column_int(row, 0, "Proc"),
         )
         .map_err(|_| "找不到所选 SID/STAR".to_string())?;
-    if procedure_type != 1 && procedure_type != 2 {
-        return Err("所选数据不是 SID/STAR".to_string());
+    if procedure_type != 1 && procedure_type != 2 && procedure_type != 3 {
+        return Err("所选数据不是 SID/STAR/进近程序".to_string());
     }
     let selected_runway = normalize_runway(runway);
     let selected_transition = transition.trim().to_uppercase();
-    let mut statement = connection.prepare("SELECT COALESCE(waypoint.Ident, ''), COALESCE(waypoint.Name, ''), leg.WptLat, leg.WptLon, COALESCE(leg.Transition, ''), COALESCE(leg.TrackCode, '') FROM TerminalLegs AS leg LEFT JOIN Waypoints AS waypoint ON waypoint.ID = leg.WptID WHERE leg.TerminalID = ?1 ORDER BY leg.ID").map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT COALESCE(waypoint.Ident, ''), COALESCE(waypoint.Name, ''), leg.WptLat, leg.WptLon, COALESCE(leg.Transition, ''), COALESCE(leg.TrackCode, ''), leg.CenterLat, leg.CenterLon, leg.Course FROM TerminalLegs AS leg LEFT JOIN Waypoints AS waypoint ON waypoint.ID = leg.WptID WHERE leg.TerminalID = ?1 ORDER BY leg.ID").map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![procedure_id], |row| {
             Ok((
@@ -499,12 +584,15 @@ fn procedure_points(
                 row.get::<_, Option<f64>>(3)?.unwrap_or_default(),
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
+                row.get::<_, Option<f64>>(6)?.unwrap_or_default(),
+                row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                row.get::<_, Option<f64>>(8)?.unwrap_or_default(),
             ))
         })
         .map_err(|error| error.to_string())?;
-    let mut points = Vec::new();
+    let mut points: Vec<FlightRoutePoint> = Vec::new();
     for (index, row) in rows.enumerate() {
-        let (ident, name, latitude, longitude, leg_transition, track_code) =
+        let (ident, name, latitude, longitude, leg_transition, track_code, center_latitude, center_longitude, course) =
             row.map_err(|error| error.to_string())?;
         let normalized_transition = leg_transition.trim().to_uppercase();
         let runway_leg = normalized_transition.starts_with("RW")
@@ -518,12 +606,35 @@ fn procedure_points(
         {
             continue;
         }
-        if !latitude.is_finite()
-            || !longitude.is_finite()
-            || latitude.abs() > 90.0
-            || longitude.abs() > 180.0
-            || (latitude == 0.0 && longitude == 0.0)
-        {
+        let leg_type = {
+            let code = track_code.trim().to_uppercase();
+            (!code.is_empty()).then_some(code)
+        };
+        let has_coordinates = latitude.is_finite()
+            && longitude.is_finite()
+            && latitude.abs() <= 90.0
+            && longitude.abs() <= 180.0
+            && (latitude != 0.0 || longitude != 0.0);
+        // CA/CD/CR/VA/VI 这类纯航向腿没有终点坐标（到高度/截获航向道为止），
+        // 从上一个已绘点沿航向外推一个展示点，让这类航段在地图上可见（前端画虚线）。
+        if !has_coordinates {
+            if !course.is_finite() {
+                continue;
+            }
+            let Some(previous) = points.last() else {
+                continue;
+            };
+            let stub = project_course(previous.latitude, previous.longitude, course, 6.0);
+            points.push(FlightRoutePoint {
+                name: leg_type.clone().unwrap_or_else(|| "COURSE".to_string()),
+                ident: leg_type.clone().unwrap_or_else(|| "COURSE".to_string()),
+                latitude: stub.0,
+                longitude: stub.1,
+                leg_type: leg_type.clone(),
+                arc_center: None,
+                course: Some(course),
+                course_only: true,
+            });
             continue;
         }
         let ident = if ident.trim().is_empty() {
@@ -531,6 +642,11 @@ fn procedure_points(
         } else {
             ident.trim().to_string()
         };
+        let arc_center = (leg_type.as_deref() == Some("RF")
+            && center_latitude.is_finite()
+            && center_longitude.is_finite()
+            && (center_latitude != 0.0 || center_longitude != 0.0))
+        .then_some((center_latitude, center_longitude));
         let point = FlightRoutePoint {
             name: if name.trim().is_empty() {
                 ident.clone()
@@ -540,6 +656,10 @@ fn procedure_points(
             ident,
             latitude,
             longitude,
+            leg_type: leg_type.clone(),
+            arc_center,
+            course: None,
+            course_only: false,
         };
         if points
             .last()
@@ -550,6 +670,16 @@ fn procedure_points(
         points.push(point);
     }
     Ok(points)
+}
+
+/// 沿磁航向（度，从北顺时针）从起点外推指定海里数，返回 (lat, lon)。
+/// 短距离（个位数海里）用平面近似即可。
+fn project_course(latitude: f64, longitude: f64, course_degrees: f64, distance_nm: f64) -> (f64, f64) {
+    let radians = course_degrees.to_radians();
+    let delta_latitude = distance_nm * radians.cos() / 60.0;
+    let delta_longitude =
+        distance_nm * radians.sin() / (60.0 * latitude.to_radians().cos().max(0.2));
+    (latitude + delta_latitude, longitude + delta_longitude)
 }
 
 fn search_airports(
@@ -806,13 +936,19 @@ pub fn get_navigation_airport_procedures(
             message: "当前导航库不含 SID/STAR 航段；可在设置中选择 Fenix nd.db3。".to_string(),
             sids: Vec::new(),
             stars: Vec::new(),
+            approaches: Vec::new(),
         });
     };
-    let (sids, stars) = airport_procedures(&connection, &normalized)?;
-    let message = if sids.is_empty() && stars.is_empty() {
-        format!("{source} 中没有 {normalized} 的 SID/STAR")
+    let (sids, stars, approaches) = airport_procedures(&connection, &normalized)?;
+    let message = if sids.is_empty() && stars.is_empty() && approaches.is_empty() {
+        format!("{source} 中没有 {normalized} 的 SID/STAR/进近程序")
     } else {
-        format!("{source} · {} 条 SID · {} 条 STAR", sids.len(), stars.len())
+        format!(
+            "{source} · {} 条 SID · {} 条 STAR · {} 条进近",
+            sids.len(),
+            stars.len(),
+            approaches.len()
+        )
     };
     Ok(NavigationAirportProcedures {
         source: "fenix".to_string(),
@@ -820,6 +956,7 @@ pub fn get_navigation_airport_procedures(
         message,
         sids,
         stars,
+        approaches,
     })
 }
 
@@ -838,6 +975,59 @@ pub fn get_navigation_procedure_points(
         runway.as_deref().unwrap_or_default(),
         transition.as_deref().unwrap_or_default(),
     )
+}
+
+/// 跑道入口（threshold）坐标：离场/进场有程序航迹时，航路应从跑道入口
+/// 起飞、到入口落地，而不是钉在机场参考点上。Fenix 的 Runways 表自带
+/// 门槛经纬度；查询不到（无库/无此跑道/LNM 源）就返回 None，由前端回退。
+#[tauri::command]
+pub fn get_navigation_runway_threshold(
+    icao: String,
+    runway: String,
+) -> Result<Option<FlightRoutePoint>, String> {
+    let normalized = icao.trim().to_uppercase();
+    let selected_runway = normalize_runway(&runway);
+    if normalized.len() != 4 || selected_runway.is_empty() {
+        return Ok(None);
+    }
+    let Some((connection, _)) = procedure_connection()? else {
+        return Ok(None);
+    };
+    let mut statement = connection
+        .prepare(
+            "SELECT r.Latitude, r.Longtitude FROM Runways AS r \
+             JOIN Airports AS a ON a.ID = r.AirportID \
+             WHERE UPPER(TRIM(a.ICAO)) = ?1 AND UPPER(TRIM(r.Ident)) = ?2 LIMIT 1",
+        )
+        .map_err(|error| error.to_string())?;
+    let threshold = statement
+        .query_row(params![normalized, selected_runway], |row| {
+            let latitude: Option<f64> = row.get(0)?;
+            let longitude: Option<f64> = row.get(1)?;
+            Ok((
+                latitude.unwrap_or_default(),
+                longitude.unwrap_or_default(),
+            ))
+        })
+        .ok()
+        .filter(|(latitude, longitude)| {
+            latitude.is_finite()
+                && longitude.is_finite()
+                && latitude.abs() <= 90.0
+                && longitude.abs() <= 180.0
+                && (*latitude != 0.0 || *longitude != 0.0)
+        })
+        .map(|(latitude, longitude)| FlightRoutePoint {
+            name: format!("RW{selected_runway}"),
+            ident: format!("RW{selected_runway}"),
+            latitude,
+            longitude,
+            leg_type: None,
+            arc_center: None,
+            course: None,
+            course_only: false,
+        });
+    Ok(threshold)
 }
 
 fn map_points_from_table(
@@ -882,6 +1072,7 @@ fn map_points_from_table(
                 iata: String::new(),
                 kind: kind.to_string(),
                 symbol: row.get(4)?,
+                reporting: None,
                 latitude: row.get(2)?,
                 longitude: row.get(3)?,
             })
@@ -983,6 +1174,7 @@ fn map_airports(
                 name: row.get(2)?,
                 kind: "机场".to_string(),
                 symbol: row.get(5)?,
+                reporting: None,
                 latitude: row.get(3)?,
                 longitude: row.get(4)?,
             })
@@ -1083,13 +1275,21 @@ fn navigation_airway(segments: &[AirwaySegment]) -> NavigationAirway {
         .map(|segment| NavigationAirwayLeg {
             coordinates: [segment.from, segment.to],
             direction: segment.direction.clone(),
+            level: segment.airway_type.clone(),
             minimum_altitude: segment.minimum_altitude,
             maximum_altitude: segment.maximum_altitude,
         })
         .collect();
+    // 整条航路的级别：各段一致取该值，混杂（同一航路高低空分段）归入双层，
+    // 对应 Jeppesen 图例 ENRT-H/L 行；Fenix 的 Level 就是权威值，LNM 走原有 airway_type。
+    let airway_type = if segments.iter().all(|segment| segment.airway_type == segments[0].airway_type) {
+        segments[0].airway_type.clone()
+    } else {
+        "B".to_string()
+    };
     NavigationAirway {
         name: segments[0].name.clone(),
-        airway_type: segments[0].airway_type.clone(),
+        airway_type,
         route_type: segments[0].route_type.clone(),
         direction: segments[0].direction.clone(),
         coordinates,
@@ -1209,7 +1409,7 @@ fn map_fenix_airways(
     north: f64,
     limit: usize,
 ) -> Result<Vec<NavigationAirway>, String> {
-    let sql = format!("SELECT airway.Ident, leg.AirwayID, leg.ID, leg.Waypoint1ID, leg.Waypoint2ID, leg.IsStart, waypoint1.Longtitude, waypoint1.Latitude, waypoint2.Longtitude, waypoint2.Latitude FROM AirwayLegs AS leg JOIN Airways AS airway ON airway.ID = leg.AirwayID JOIN Waypoints AS waypoint1 ON waypoint1.ID = leg.Waypoint1ID JOIN Waypoints AS waypoint2 ON waypoint2.ID = leg.Waypoint2ID WHERE MAX(waypoint1.Latitude, waypoint2.Latitude) >= ?1 AND MIN(waypoint1.Latitude, waypoint2.Latitude) <= ?2 AND MAX(waypoint1.Longtitude, waypoint2.Longtitude) >= ?3 AND MIN(waypoint1.Longtitude, waypoint2.Longtitude) <= ?4 ORDER BY leg.AirwayID, leg.ID LIMIT {limit}");
+    let sql = format!("SELECT airway.Ident, leg.AirwayID, leg.ID, leg.Waypoint1ID, leg.Waypoint2ID, leg.IsStart, waypoint1.Longtitude, waypoint1.Latitude, waypoint2.Longtitude, waypoint2.Latitude, leg.Level FROM AirwayLegs AS leg JOIN Airways AS airway ON airway.ID = leg.AirwayID JOIN Waypoints AS waypoint1 ON waypoint1.ID = leg.Waypoint1ID JOIN Waypoints AS waypoint2 ON waypoint2.ID = leg.Waypoint2ID WHERE MAX(waypoint1.Latitude, waypoint2.Latitude) >= ?1 AND MIN(waypoint1.Latitude, waypoint2.Latitude) <= ?2 AND MAX(waypoint1.Longtitude, waypoint2.Longtitude) >= ?3 AND MIN(waypoint1.Longtitude, waypoint2.Longtitude) <= ?4 ORDER BY leg.AirwayID, leg.ID LIMIT {limit}");
     let mut statement = connection
         .prepare(&sql)
         .map_err(|error| error.to_string())?;
@@ -1217,7 +1417,9 @@ fn map_fenix_airways(
         .query_map(params![south, north, west, east], |row| {
             Ok(AirwaySegment {
                 name: row.get(0)?,
-                airway_type: String::new(),
+                // Fenix 的 Level 直接存了航段高度层（L/H/B），Jeppesen 图例里
+                // ENRT-L / ENRT-H / ENRT-H/L 的区分依据就是它。
+                airway_type: row.get(10)?,
                 route_type: String::new(),
                 direction: String::new(),
                 minimum_altitude: None,
@@ -1285,5 +1487,10 @@ pub fn get_navigation_map_data(
         airports: map_airports(&connection, &source, west, south, east, north)?,
         navaids: map_navaids(&connection, &source, west, south, east, north)?,
         airways: map_airways(&connection, &source, west, south, east, north, zoom)?,
+        // 以下三类当前数据源（LNM / Fenix 导航库）没有对应表，
+        // 先固定为空集；接入数据后在此填充即可，前端契约已就绪。
+        holding_patterns: Vec::new(),
+        mora_cells: Vec::new(),
+        special_use_airspace: Vec::new(),
     })
 }

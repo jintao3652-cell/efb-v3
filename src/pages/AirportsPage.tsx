@@ -5,7 +5,6 @@ import { AirportGroundMap } from "../components/airport/AirportGroundMap";
 import { loadAdHpAirports } from "../lib/airport-data";
 import { airports } from "../lib/data";
 import { getNavigationAirportDetails, getNavigationDatabaseStatus, getXflyAirportData, searchNavigationAirports, type XflyAirportData } from "../lib/tauri";
-import { useAppStore } from "../stores/app-store";
 import type { Airport } from "../types";
 
 type AirportTab = "overview" | "ground" | "charts";
@@ -17,7 +16,6 @@ const runwayLabel = (runway: XflyRunway) => {
 };
 
 export function AirportsPage() {
-  const online = useAppStore((state) => state.online);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Airport>(airports[0]);
   const [tab, setTab] = useState<AirportTab>("overview");
@@ -37,7 +35,7 @@ export function AirportsPage() {
   }, [adHp.data, databaseAirports]);
   const usingDatabaseAirport = databaseAirports.some((airport) => airport.icao === selected.icao);
   const airportDetails = useQuery({ queryKey: ["navigation-airport-details", selected.icao], queryFn: () => getNavigationAirportDetails(selected.icao), enabled: Boolean(navigation.data?.ready && usingDatabaseAirport), retry: 0 });
-  const xfly = useQuery({ queryKey: ["xfly-airport", selected.icao, online], queryFn: () => getXflyAirportData(selected.icao, !online), enabled: selected.icao.length === 4, retry: 0, staleTime: 10 * 60_000 });
+  const xfly = useQuery({ queryKey: ["xfly-airport", selected.icao], queryFn: () => getXflyAirportData(selected.icao), enabled: selected.icao.length === 4, retry: 0, staleTime: 10 * 60_000 });
   const matches = useMemo(() => allAirports.filter((airport) => `${airport.icao}${airport.iata}${airport.name}${airport.city}`.toLowerCase().includes(query.toLowerCase())).slice(0, 120), [allAirports, query]);
   const runways = xfly.data?.runways.length ? xfly.data.runways.map(runwayLabel) : usingDatabaseAirport ? airportDetails.data?.runways ?? [] : selected.runways;
   const frequencies = xfly.data?.frequencies.length ? xfly.data.frequencies.map((frequency) => ({ name: `${frequency.frequencyType} · ${frequency.description}`, value: frequency.frequencyMhz })) : usingDatabaseAirport ? airportDetails.data?.frequencies ?? [] : selected.frequencies;

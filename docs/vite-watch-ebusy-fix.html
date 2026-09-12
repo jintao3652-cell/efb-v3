@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>npm run tauri dev 崩溃修复 — Vite 监听 EBUSY</title>
+<style>
+  :root {
+    --bg: #07111f; --panel: #0e1c28; --panel2: #101d27; --line: #24455e;
+    --fg: #dcecf4; --dim: #8fb0c4; --accent: #4fc3f7; --ok: #4ade80; --bad: #ff7b72; --warn: #f0c674;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 40px 60px; background: var(--bg); color: var(--fg);
+    font: 15px/1.75 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 25px; margin: 0 0 6px; letter-spacing: .3px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 30px; }
+  h2 { font-size: 17px; margin: 38px 0 12px; padding-left: 11px; border-left: 3px solid var(--accent); }
+  p { margin: 10px 0; color: #c8dbe6; }
+  code, pre { font-family: Consolas, "Cascadia Mono", monospace; }
+  code { background: #16283a; border: 1px solid #23394d; border-radius: 4px; padding: 1px 6px; font-size: 13px; color: #a8d8f0; }
+  pre { background: #0a1723; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.65; color: #cfe3ed; }
+  pre .c { color: #5f7d92; }
+  pre .g { color: var(--ok); }
+  pre .r { color: var(--bad); }
+  pre .y { color: var(--warn); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+  .chain { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .chain li { position: relative; padding: 9px 0 9px 44px; border-bottom: 1px dashed #1e3549; font-size: 14px; color: #c8dbe6; }
+  .chain li:last-child { border-bottom: none; }
+  .chain li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 10px;
+    width: 25px; height: 25px; border-radius: 50%; background: #17334a; color: var(--accent);
+    font: 700 12px/25px Consolas, monospace; text-align: center; }
+  .chain li b { color: #fff; }
+  .chain li.hot::before { background: #4a1f22; color: var(--bad); }
+  .chain li.hot { color: #ffd9d6; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid #1e3549; }
+  th { background: #12293c; color: #a8d8f0; font-weight: 700; font-size: 12.5px; letter-spacing: .4px; }
+  td.num { font-family: Consolas, monospace; text-align: right; }
+  .before { color: var(--bad); font-weight: 700; }
+  .after { color: var(--ok); font-weight: 700; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; color: #a8d8f0; letter-spacing: .4px; }
+  .card ul { margin: 0; padding-left: 18px; font-size: 13px; color: #c8dbe6; }
+  .card li { margin: 4px 0; }
+  .tag { display: inline-block; font: 700 11px/1.8 Consolas, monospace; padding: 0 8px; border-radius: 4px; letter-spacing: .5px; }
+  .tag.fixed { background: #14402a; color: var(--ok); }
+  .tag.why { background: #4a2a15; color: var(--warn); }
+  .foot { margin-top: 40px; padding-top: 16px; border-top: 1px solid #1e3549; color: #6d8ba0; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1><code>npm run tauri dev</code> 崩溃修复 —— Vite 监听到了 cargo 的 dll</h1>
+<div class="sub">EFB V3 · 2026-09-11 · 症状：编译进行中 dev server 被 EBUSY 打死，Tauri 报 beforeDevCommand 非零退出</div>
+
+<h2>一、症状</h2>
+<pre>Compiling webview2-com v0.38.2
+========&gt; ] 453/455: skyboar…
+<span class="r">Error: EBUSY: resource busy or locked, watch '…\src-tauri\target\debug\deps\skyboard_efb_lib.dll'</span>
+    at createFsWatchInstance (…/vite/dist/node/chunks/dep-Dm0c1Wj2.js:22195:17)
+Emitted 'error' event on FSWatcher instance at: …
+<span class="r">Error The "beforeDevCommand" terminated with a non-zero status code.</span></pre>
+<p>注意崩溃点不在编译，而在 <b>node 侧的 fs.watch</b>。cargo 只是恰好正在写那个 dll。</p>
+
+<h2>二、根因链</h2>
+<div class="panel">
+<ol class="chain">
+  <li><code>vite.config.ts</code> 的 <code>server.watch.ignored</code> 为空，Vite 递归监听<b>整个项目根目录</b></li>
+  <li><code>src-tauri/target</code> 下有 <b>8073 个文件</b>（cargo 全部构建产物），逐一被挂上 <code>fs.watch</code></li>
+  <li>其中 <code>target/debug/deps/*.dll</code> 正被 cargo 的链接器<b>独占占用</b></li>
+  <li class="hot">Windows 上给这种文件建 <code>fs.watch</code> → <b>ERROR_SHARING_VIOLATION</b>，libuv 映射成 <b>EBUSY</b></li>
+  <li class="hot">Vite 默认的 <code>ignorePermissionErrors: true</code> <b>只吞 EPERM / EACCES，不吞 EBUSY</b></li>
+  <li>EBUSY 于是成为 <code>FSWatcher</code> 上的<b>未处理 error 事件</b> → node 进程直接崩</li>
+  <li>子进程崩 → Tauri 报 <code>beforeDevCommand terminated with a non-zero status code</code></li>
+</ol>
+</div>
+<p>第 5 步是关键，Vite 源码里写得很明确（<code>dist/node/chunks/dep-*.js</code>）：</p>
+<pre><span class="c">// 只有 EPERM / EACCES 会被忽略，EBUSY 会继续往上抛</span>
+(!this.options.ignorePermissionErrors || (code !== 'EPERM' &amp;&amp; code !== 'EACCES'))</pre>
+<p>而 Vite 自带的忽略清单里 <b>没有 src-tauri</b>：</p>
+<pre>ignored = [<span class="y">"**/.git/**"</span>, <span class="y">"**/node_modules/**"</span>, <span class="y">"**/test-results/**"</span>, cacheDir + "/**", ...outDirs]</pre>
+
+<h2>三、量化证据</h2>
+<p>monkey-patch <code>fs.watch</code>，用 Vite 的 JS API 起服务，统计启动期所有被监听的路径：</p>
+<table>
+  <thead><tr><th>被监听位置</th><th class="num">改前</th><th class="num">改后</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>src-tauri/**</code></td><td class="num before">16032</td><td class="num after">0</td><td>cargo 产物，就是崩溃源</td></tr>
+    <tr><td><code>.workbuddy/**</code></td><td class="num before">107</td><td class="num after">0</td><td>项目记忆，前端不引用</td></tr>
+    <tr><td><code>src/**</code></td><td class="num">38</td><td class="num">38</td><td><b>真正要 HMR 的，前后一致</b></td></tr>
+    <tr><td>其余零散（docs / 根配置文件）</td><td class="num">23</td><td class="num">23</td><td>无影响</td></tr>
+    <tr><td><b>合计</b></td><td class="num before">16200</td><td class="num after">61</td><td><b>减少 99.6%</b></td></tr>
+  </tbody>
+</table>
+<p><code>src/**</code> 的 38 次前后完全一致，这就是「HMR 覆盖没有缩水」的直接证据 —— 不是推断。</p>
+
+<h2>四、修复</h2>
+<pre><span class="c">// vite.config.ts</span>
+server: {
+  port: 1420,
+  strictPort: true,
+  host: host || "127.0.0.1",
+  hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+  watch: {
+    <span class="g">ignored: ["**/src-tauri/**", "**/.workbuddy/**"],</span>  <span class="c">// ← 新增</span>
+  },
+}</pre>
+<p>这是 Tauri 官方模板的标准配置，手写脚手架的项目很容易漏。忽略整个 <code>src-tauri</code> 不会影响前端：
+Vite 只吃 <code>src/</code> 与 <code>index.html</code>，Rust 侧的文件由 cargo 自己监听，两者互不相干。</p>
+
+<h2>五、验证</h2>
+<div class="grid2">
+  <div class="card">
+    <h3>DEV SERVER 启动</h3>
+    <ul>
+      <li><span class="ok">✓</span> ready in 769 ms</li>
+      <li><span class="ok">✓</span> 进程存活 10s+ 不再自杀</li>
+      <li><span class="ok">✓</span> 输出无 EBUSY、无 FSWatcher error</li>
+      <li><span class="ok">✓</span> GET <code>/</code> 200 含 <code>#root</code></li>
+      <li><span class="ok">✓</span> GET <code>/src/main.tsx</code> 200</li>
+      <li><span class="ok">✓</span> GET <code>/src/pages/MapPage.tsx</code> 200</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>HMR 实战</h3>
+    <ul>
+      <li><span class="ok">✓</span> 真改 <code>src/styles.css</code> → <code>[vite] (client) hmr update /src/styles.css</code></li>
+      <li><span class="ok">✓</span> 探针后 Buffer 字节级还原</li>
+      <li><span class="ok">✓</span> <code>tsc -b</code> 0 error</li>
+      <li><span class="ok">✓</span> <code>vite build</code> 成功</li>
+    </ul>
+  </div>
+</div>
+<p class="sub" style="margin-top:12px">注：验证 HMR 时必须先真实 GET 过页面与模块，否则模块图为空，改文件不会产生 <code>hmr update</code>。</p>
+
+<h2>六、顺带闭环：Rust 改动终于编译验证了</h2>
+<p>排查中发现 <code>C:\Users\Administrator\.cargo\bin\cargo.exe</code>（cargo / rustc 1.98.1，
+<code>stable-x86_64-pc-windows-msvc</code>）<b>已经装好，只是不在 bash 的 PATH 里</b> ——
+此前「本机无 Rust 工具链」的判断作废。</p>
+<pre>export PATH="$PATH:/c/Users/Administrator/.cargo/bin"
+cd src-tauri &amp;&amp; cargo check --message-format short
+<span class="c"># cargo check 只做类型检查、不链接，因此【不需要 vcvars / MSVC 环境】</span>
+<span class="g">Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 25s   → exit=0，0 error 0 warning</span></pre>
+<p>于是前几轮一直无法验证的 Rust 改动 —— <code>NavigationMapPoint.reporting</code>、
+<code>holdingPatterns</code> / <code>moraCells</code> / <code>specialUseAirspace</code> 三个可选数组 ——
+本次确认编译通过。以后改 <code>src-tauri</code> 都该先跑一遍 <code>cargo check</code>，不必再靠逐行肉眼复核。</p>
+
+<h2>七、排错笔记（都是这次真踩到的）</h2>
+<table>
+  <thead><tr><th>坑</th><th>真相</th></tr></thead>
+  <tbody>
+    <tr><td>解析 Vite 输出匹配不上 <code>ready in</code></td><td><code>ready in</code> 被 ANSI 绿色码包住（<code>\x1b[32m…\x1b[0m</code>），<b>必须先剥转义码再匹配</b></td></tr>
+    <tr><td>想用文件独占锁复现 EBUSY</td><td>复现不出来 —— libuv 监听的是<b>父目录句柄</b>，文件级锁不影响；别用造锁的方式复现</td></tr>
+    <tr><td><code>where cargo</code> 查不到</td><td>≠ 没安装，只是不在当前 shell 的 PATH</td></tr>
+    <tr><td><code>ignorePermissionErrors</code> 能救吗</td><td>不能，它只覆盖 EPERM / EACCES</td></tr>
+  </tbody>
+</table>
+
+<div class="foot">
+  <span class="tag fixed">FIXED</span>
+  <span class="tag why">vite.config.ts · server.watch.ignored</span><br><br>
+  相关技能：<code>tauri-dev-windows-troubleshooting</code>（含 fs.watch 统计与 HMR 验证脚本）▸
+  实测环境：vite 6.4.3 / node 24.16.0 / cargo 1.98.1 / Windows
+</div>
+
+</body>
+</html>

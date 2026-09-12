@@ -225,6 +225,25 @@ export async function fetchJsonWithRetry<T>(url: string, options: FetchJsonOptio
   throw lastError;
 }
 
+export async function fetchTextWithRetry(url: string, options: FetchJsonOptions = {}): Promise<string> {
+  const { signal, timeoutMs = 12_000, retries = 1, retryDelayMs = 700, ...requestInit } = options;
+  let lastError = new Error("网络请求失败");
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await withTimeout(timeoutMs, signal, async (requestSignal) => {
+        const response = await fetch(url, { ...requestInit, signal: requestSignal });
+        if (!response.ok) throw new HttpError(response.status, response.statusText);
+        return response.text();
+      });
+    } catch (error) {
+      lastError = asError(error);
+      if (signal?.aborted || attempt >= retries || !shouldRetry(lastError)) throw lastError;
+      await waitFor(retryDelayMs * 2 ** attempt, signal);
+    }
+  }
+  throw lastError;
+}
+
 export async function loadCachedResource<T>({ cacheKey, ttlMs, signal, load }: CachedResourceOptions<T>): Promise<CachedResource<T>> {
   const existingRequest = inFlightRequests.get(cacheKey) as Promise<CachedResource<T>> | undefined;
   if (existingRequest) return existingRequest;
@@ -233,10 +252,6 @@ export async function loadCachedResource<T>({ cacheKey, ttlMs, signal, load }: C
     const cached = await readCache<T>(cacheKey);
     const age = cached ? Date.now() - cached.cachedAt : Number.POSITIVE_INFINITY;
     if (cached && age <= ttlMs) return { data: cached.data, meta: { source: "cache", stale: false, cachedAt: cached.cachedAt } };
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      if (cached) return { data: cached.data, meta: { source: "cache", stale: true, cachedAt: cached.cachedAt, error: "当前离线" } };
-      throw new Error("当前离线，且没有可用缓存");
-    }
     try {
       const data = await load(signal ?? new AbortController().signal);
       const record = { key: cacheKey, cachedAt: Date.now(), data, size: estimatedSize(data) };

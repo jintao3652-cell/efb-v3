@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>扇区管制详情卡 · 右侧栏布局 · EFB V3</title>
+<style>
+  /* ── 文档样式（浅色） ───────────────────────────────── */
+  :root {
+    --ink: #14202b; --ink-soft: #4a5c6b; --ink-faint: #7d8f9c;
+    --line: #dfe6ec; --line-soft: #eef3f7; --card: #fff; --bg: #f4f7fa;
+    --ok: #0f8f5f; --accent: #0a6fb0; --warn: #b06a00;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 40px 28px 72px; background: var(--bg); color: var(--ink);
+    font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; }
+  .wrap { max-width: 1020px; margin: 0 auto; }
+  h1 { font-size: 25px; margin: 0 0 6px; letter-spacing: -.2px; }
+  .sub { color: var(--ink-faint); font-size: 13.5px; margin: 0 0 32px; }
+  h2 { font-size: 17px; margin: 40px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  h2:first-of-type { margin-top: 0; }
+  h3 { font-size: 14px; margin: 26px 0 10px; color: var(--ink-soft); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 0 0 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; background: var(--card); }
+  th, td { border: 1px solid var(--line); padding: 9px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--line-soft); font-weight: 700; font-size: 12.5px; }
+  code { background: var(--line-soft); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+    font: 12px/1.5 Consolas, "Cascadia Code", monospace; }
+  .ok { color: var(--ok); font-weight: 700; }
+  .note { color: var(--ink-faint); font-size: 13px; }
+  ul { margin: 8px 0 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+
+  /* ── 预览台：深色地图底 ─────────────────────────────── */
+  .stage { position: relative; height: 700px; margin: 14px 0 10px; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 12px;
+    background:
+      radial-gradient(circle at 22% 18%, #17405c 0, transparent 46%),
+      linear-gradient(135deg, #0d2334, #071523 62%);
+    background-size: auto, auto; }
+  .grid-overlay { position: absolute; inset: 0; opacity: .22;
+    background-image: linear-gradient(#2b5a7a 1px, transparent 1px), linear-gradient(90deg, #2b5a7a 1px, transparent 1px);
+    background-size: 46px 46px; }
+  .stage-label { position: absolute; top: 14px; left: 16px; z-index: 1; color: #7fb6d6;
+    font: 700 11px/1.5 Consolas, monospace; letter-spacing: .6px; }
+  .mock-flight-plan { position: absolute; z-index: 5; inset: 0 auto 0 0; width: 300px; padding: 14px;
+    color: #dbe6ef; border-right: 1px solid #405066; background: #202a38; font-size: 11px; }
+  .mock-flight-plan b { display: block; font-size: 14px; letter-spacing: .4px; margin-bottom: 10px; }
+  .mock-flight-plan p { margin: 0; color: #8fa4b8; font-size: 10.5px; }
+
+  /* ── 以下为 src/styles.css 中真实规则的逐字副本 ───────── */
+  .map-right-rail { position: absolute; z-index: 4; inset: 0 0 0 auto; display: flex; flex-direction: column; gap: 14px; width: 342px; padding: 16px; }
+  .controller-detail-panel { display: flex; flex: 0 0 auto; flex-direction: column; gap: 14px; max-height: 46%; overflow-y: auto; color: #dcecf4; border: 1px solid #36556d; border-radius: 12px; padding: 16px 17px; background: #07111bea; box-shadow: 0 8px 26px #0006; backdrop-filter: blur(14px); scrollbar-color: #315069 transparent; }
+  .controller-detail-panel > *, .traffic-detail-panel > * { flex: 0 0 auto; }
+  .controller-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .controller-detail-header > div { display: grid; gap: 3px; min-width: 0; }
+  .controller-detail-header strong { color: #fff; font-size: 24px; letter-spacing: 1px; line-height: 1.15; overflow-wrap: anywhere; }
+  .controller-detail-header span { color: #7897aa; font-size: 11px; overflow-wrap: anywhere; }
+  .controller-detail-header button { display: grid; place-items: center; flex: 0 0 auto; color: #a7c0cf; border: 1px solid #315069; border-radius: 6px; padding: 5px; background: #10283b; }
+  .controller-detail-switch { display: flex; flex-wrap: wrap; gap: 5px; }
+  .controller-detail-switch button { color: #9db7c6; border: 1px solid #315069; border-radius: 5px; padding: 4px 8px; background: #10283b; font-size: 10px; }
+  .controller-detail-switch button.active { color: #05202b; border-color: #79dcff; background: #79dcff; }
+  /* 三格宽度按实测定：本机实际生效字体是 Microsoft YaHei UI，
+     最宽文案 Departure 15px 下 76.9px、频率最宽 118.005 15px 下 59.8px，
+     而 1.25fr/1fr/1fr 给到 87.1px 与 66.5px，两列各留 6px 以上余量。 */
+  .controller-detail-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 1px; overflow: hidden; border: 1px solid #263b4a; border-radius: 8px; background: #263b4a; }
+  .controller-detail-grid > div { display: grid; gap: 3px; min-width: 0; padding: 11px 8px; background: #101d27; }
+  .controller-detail-grid strong { color: #f2f8fb; font-size: 15px; line-height: 1.15; overflow-wrap: anywhere; }
+  .controller-detail-grid span { color: #7897aa; font-size: 10px; }
+  .controller-detail-atis { display: grid; gap: 3px; border-top: 1px solid #29465d; padding-top: 12px; color: #cfe3ed; font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+  .controller-detail-atis p { margin: 0; }
+  .traffic-detail-panel { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; gap: 14px; width: 100%; min-height: 0; overflow-y: auto; color: #dcecf4; border: 1px solid #36556d; border-radius: 12px; padding: 17px; background: #07111bea; box-shadow: 0 8px 26px #0006; backdrop-filter: blur(14px); }
+  .traffic-detail-header { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid #29465d; padding-bottom: 13px; }
+  .traffic-detail-header > div { display: grid; gap: 4px; }
+  .traffic-detail-header span, .traffic-detail-card span, .traffic-detail-grid span { color: #7897aa; font-size: 10px; }
+  .traffic-detail-header strong { color: #fff; font-size: 24px; letter-spacing: 1px; }
+  .traffic-detail-header button { display: grid; place-items: center; color: #a7c0cf; border: 1px solid #315069; border-radius: 6px; padding: 5px; background: #10283b; }
+  .traffic-route { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; text-align: center; }
+  .traffic-route strong { color: #ffb43d; font-size: 25px; letter-spacing: 1px; }
+  .traffic-route span { position: relative; color: #ffd261; }
+  .traffic-route span::before, .traffic-route span::after { content: ""; position: absolute; top: 50%; width: 30px; height: 2px; background: #4e6471; }
+  .traffic-route span::before { right: 25px; }
+  .traffic-route span::after { left: 25px; }
+  .traffic-route small { grid-column: 1 / -1; color: #89a4b4; font-size: 10px; }
+  .traffic-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; overflow: hidden; border: 1px solid #263b4a; border-radius: 8px; background: #263b4a; }
+  .traffic-detail-grid > div { display: grid; gap: 3px; padding: 11px; background: #101d27; }
+  .traffic-detail-grid strong { color: #f2f8fb; font-size: 13px; }
+  .traffic-detail-grid .squawk { color: #a8ff32; }
+  .traffic-detail-card { display: grid; gap: 4px; border: 1px solid #263b4a; border-radius: 8px; padding: 11px; background: #101d27; }
+  .traffic-detail-card strong { font-size: 13px; }
+  .traffic-detail-card small { color: #7897aa; font-size: 10px; }
+  .traffic-detail-card p { margin: 0; max-height: 110px; overflow-y: auto; color: #c5d8e2; font-size: 11px; line-height: 1.55; }
+  .traffic-detail-footer { margin-top: auto; color: #627f91; font-size: 9px; text-align: center; }
+
+  /* 预览专用：在真实 gap 上画一条标注线 */
+  .gap-marker { position: absolute; z-index: 9; display: flex; align-items: center; pointer-events: none; }
+  .gap-marker i { display: block; width: 46px; height: 0; border-top: 2px dashed #ff6b6b; }
+  .gap-marker b { margin-left: 7px; color: #ff8f8f; font: 700 11px/1 Consolas, monospace; white-space: nowrap; }
+  .measure { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 100px;
+    background: #e7f6ee; border: 1px solid #9bcdb5; color: #0f8f5f; font: 700 11.5px/1.7 Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>扇区管制详情卡 · 右侧栏布局</h1>
+  <p class="sub">点击「有管制」的 FIR / APP 扇区 → 右侧打开席位卡；与 VATSIM FLIGHT 卡共处一栏，固定 14px 间距，FLIGHT 卡被压短而不是被盖住。</p>
+
+  <h2>一、交互规则</h2>
+  <table>
+    <thead><tr><th style="width:34%">鼠标动作</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>点击<strong>有管制</strong>的 APP / TRACON 扇区</td><td>右侧栏顶部出现该扇区席位的详情卡（呼号 / 管制员 · VATSIM / 设施类型 / 频率 / 在线时间 / 席位备注）</td></tr>
+      <tr><td>点击<strong>有管制</strong>的 FIR / UIR 边界或区域</td><td>同上。APP 图层叠在 FIR 之上，故同一个点优先选中 APP 扇区，不会退化成「整片 FIR」</td></tr>
+      <tr><td>点击<strong>无管制</strong>的扇区或空白地图</td><td>收起管制详情卡（无管制扇区本就不可点，光标也不是手型）</td></tr>
+      <tr><td>点击 VATSIM 航班点</td><td>只打开 FLIGHT 卡，<strong>不会</strong>顺手关掉已打开的管制卡 —— 两张卡可同时在看</td></tr>
+      <tr><td>席位下线（快照刷新）</td><td>自动收起管制卡，不残留查不到数据的空壳</td></tr>
+      <tr><td>距离测量模式开启时</td><td>点击只用于打点测距，不触发扇区选中</td></tr>
+    </tbody>
+  </table>
+  <p class="note" style="margin-top:10px">一个扇区可能同时有多个席位在线（如 ZBPE_CTR + ZBPE_N_CTR），此时卡片顶部出现呼号切换按钮。<br>
+  实测：当前快照中 FIR 有 6 个扇区、TRACON 有 1 个扇区属于这种多席位情况。</p>
+
+  <h2>二、三种状态的右侧栏</h2>
+
+  <h3>A. 只点了扇区（未打开 FLIGHT 卡）</h3>
+  <div class="stage" id="stage-a">
+    <div class="grid-overlay"></div>
+    <div class="stage-label">地图 · 点击有管制扇区</div>
+    <div class="map-right-rail">
+      <aside class="controller-detail-panel">
+        <div class="controller-detail-header"><div><strong>ZBAA_APP</strong><span>Xinrui.W. · VATSIM</span></div><button aria-label="关闭管制详情">✕</button></div>
+        <div class="controller-detail-grid">
+          <div><strong>Approach</strong><span>设施类型</span></div>
+          <div><strong>120.600</strong><span>频率</span></div>
+          <div><strong>01:30</strong><span>在线时间</span></div>
+        </div>
+        <div class="controller-detail-atis">
+          <p>Beijing Approach</p>
+          <p>Mentored by ZBAA_CTR</p>
+          <p>Check your FPL -&gt; vatprc.net/flights</p>
+          <p>China METRIC RVSM in use -&gt; vats.im/rvsm-china</p>
+          <p>Feedback -&gt; feedback@vatprc.net</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+  <p class="note">卡片高度自适应，长备注自动内部滚动，且最多占右侧栏高度的 46%（给 FLIGHT 卡留位置）。</p>
+
+  <h3>B. 扇区 + 已打开 FLIGHT 卡 <span class="note">（本次改动的重点）</span></h3>
+  <div class="stage" id="stage-b">
+    <div class="grid-overlay"></div>
+    <div class="mock-flight-plan"><b>ZSPD to CYYZ (CES207) ★</b><p>Unload · Hide · View SimBrief OFP</p></div>
+    <div class="stage-label">地图 · 同时选中扇区与航班</div>
+    <div class="map-right-rail">
+      <aside class="controller-detail-panel">
+        <div class="controller-detail-header"><div><strong>ZBAA_APP</strong><span>Xinrui.W. · VATSIM</span></div><button aria-label="关闭管制详情">✕</button></div>
+        <div class="controller-detail-grid">
+          <div><strong>Approach</strong><span>设施类型</span></div>
+          <div><strong>120.600</strong><span>频率</span></div>
+          <div><strong>01:30</strong><span>在线时间</span></div>
+        </div>
+        <div class="controller-detail-atis">
+          <p>Beijing Approach</p>
+          <p>Mentored by ZBAA_CTR</p>
+          <p>Check your FPL -&gt; vatprc.net/flights</p>
+          <p>China METRIC RVSM in use -&gt; vats.im/rvsm-china</p>
+          <p>Feedback -&gt; feedback@vatprc.net</p>
+        </div>
+      </aside>
+      <aside class="traffic-detail-panel">
+        <div class="traffic-detail-header"><div><span>VATSIM FLIGHT</span><strong>CES207</strong></div><button aria-label="关闭航班详情">✕</button></div>
+        <div class="traffic-route"><strong>ZSPD</strong><span>✈</span><strong>CYYZ</strong><small>备降 CYTR</small></div>
+        <div class="traffic-detail-grid">
+          <div><span>注册号</span><strong>N773ER</strong></div><div><span>机型</span><strong>B77W</strong></div>
+          <div><span>高度</span><strong>31,433 ft</strong></div><div><span>地速</span><strong>512 kts</strong></div>
+          <div><span>航向</span><strong>86°</strong></div><div><span>应答机</span><strong class="squawk">2000</strong></div>
+        </div>
+        <div class="traffic-detail-card"><span>航路</span><p>LAMEN1 LAMEN/N0508F310 A593 SADLI Y590 BEDAR Y591 BESMU Y14 SAMON Y142 GTC Y512 OATIS Y889 PUTER A590 POXED …</p></div>
+        <div class="traffic-detail-footer">最后更新：14:18:56</div>
+      </aside>
+    </div>
+  </div>
+  <p class="note">管制卡固定在右上，FLIGHT 卡从它下方开始；两卡间距实测 <span class="measure" id="gap-readout">测量中…</span></p>
+  <figure style="margin:0 0 6px">
+    <img src="airspace-controller-card-rail.png" alt="管制卡与 FLIGHT 卡同栏的实际渲染" style="display:block;width:100%;border:1px solid var(--line);border-radius:10px" />
+    <figcaption class="note" style="margin-top:8px">实际渲染快照（无头 Chrome 按真实 CSS 渲染）：管制卡在上，红色虚线标出 14px 间距，FLIGHT 卡被压短后内部滚动。</figcaption>
+  </figure>
+
+  <h3>C. 只点了航班（原行为，未受影响）</h3>
+  <div class="stage" id="stage-c" style="height:520px">
+    <div class="grid-overlay"></div>
+    <div class="stage-label">地图 · 只选航班</div>
+    <div class="map-right-rail">
+      <aside class="traffic-detail-panel">
+        <div class="traffic-detail-header"><div><span>VATSIM FLIGHT</span><strong>CES207</strong></div><button aria-label="关闭航班详情">✕</button></div>
+        <div class="traffic-route"><strong>ZSPD</strong><span>✈</span><strong>CYYZ</strong><small>备降 CYTR</small></div>
+        <div class="traffic-detail-grid">
+          <div><span>注册号</span><strong>N773ER</strong></div><div><span>机型</span><strong>B77W</strong></div>
+          <div><span>高度</span><strong>31,433 ft</strong></div><div><span>地速</span><strong>512 kts</strong></div>
+        </div>
+        <div class="traffic-detail-card"><span>飞行员</span><strong>1768563 CYYZ</strong><small>VATSIM CID 1768563</small></div>
+        <div class="traffic-detail-footer">最后更新：14:18:56</div>
+      </aside>
+    </div>
+  </div>
+
+  <h2>三、实测校验（真实数据）</h2>
+  <div class="card">
+    <p style="margin:0 0 10px">把改动后的 <code>src/lib/airspace.ts</code> 编译后，直接对线上数据跑了一遍 <code>applyActiveFirControllers</code> / <code>applyActiveTraconControllers</code>，再模拟点击把每个点亮扇区的呼号回查 VATSIM 快照：</p>
+    <table>
+      <thead><tr><th style="width:26%">校验项</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>纯函数断言</td><td class="ok">12 / 12 通过（facility 名称、HH:MM 在线时长、呼号数组与拼接串两种解码、ATIS 空行过滤）</td></tr>
+        <tr><td>边界与席位规模</td><td>1097 个 FIR 边界 / 1284 个 TRACON 扇区；快照 160 席位 / 1537 航班</td></tr>
+        <tr><td>FIR 点亮与回查</td><td class="ok">点亮 29 个 → 可生成 35 张席位卡，呼号 100% 命中快照，6 个扇区为多席位</td></tr>
+        <tr><td>TRACON 点亮与回查</td><td class="ok">点亮 18 个 → 可生成 19 张席位卡，呼号 100% 命中快照，1 个扇区为多席位</td></tr>
+        <tr><td>每个要素都带 <code>activeCallsigns</code> 数组</td><td class="ok">通过，且 <code>active</code> 与数组长度始终一致</td></tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin:12px 0 0">线上样例（即上方预览卡的真实来源）：<code>ZBAA_APP</code> · Xinrui.W. · Approach · 120.600 · 已在线 01:30，备注 5 行。</p>
+  </div>
+
+  <h2>四、改动文件</h2>
+  <table>
+    <thead><tr><th style="width:38%">文件</th><th>改动</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/lib/airspace.ts</code></td><td><code>VatsimController</code> 补 <code>cid / rating / logon_time / text_atis</code>；新增 <code>vatsimFacilityLabel</code>、<code>vatsimOnlineDuration</code>、<code>vatsimAtisLines</code>、<code>activeCallsignList</code>；两个 <code>applyActive*</code> 额外写出 <code>activeCallsigns</code> 数组（保存该扇区名下全部席位）</td></tr>
+      <tr><td><code>src/components/map/ControllerDetailPanel.tsx</code></td><td>新增。席位详情卡：呼号 / 管制员 · VATSIM / 设施类型 · 频率 · 在线时间（每 30 秒重算）/ 席位备注，多席位时带呼号切换</td></tr>
+      <tr><td><code>src/pages/MapPage.tsx</code></td><td>地图点击按 <code>TRACON → FIR</code> 优先级取活跃扇区并解码呼号；空点/无管制点击收起卡片；席位下线自动收起；可点扇区给手型光标；把管制卡与 FLIGHT 卡一起放进新的 <code>.map-right-rail</code></td></tr>
+      <tr><td><code>src/styles.css</code></td><td>新增 <code>.map-right-rail</code>（flex 列 + 14px gap）与 <code>.controller-detail-*</code>；<code>.traffic-detail-panel</code> 由「绝对定位满高」改为「栏内 flex 子项」，高度随管制卡让位；图层面板避让位移由 326px 调整为 342px</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  // 用真实布局反推 「管制卡底边 → FLIGHT 卡顶边」 的实际像素间距，避免只靠肉眼判断。
+  (function () {
+    const rail = document.querySelector("#stage-b .map-right-rail");
+    const readout = document.getElementById("gap-readout");
+    if (!rail || rail.children.length < 2) { readout.textContent = "无法测量"; return; }
+    const first = rail.children[0].getBoundingClientRect();
+    const second = rail.children[1].getBoundingClientRect();
+    const gap = Math.round(second.top - first.bottom);
+    readout.textContent = gap + " px";
+    const marker = document.createElement("div");
+    marker.className = "gap-marker";
+    marker.style.right = "16px";
+    marker.style.top = Math.round((first.bottom + second.top) / 2 - rail.parentElement.getBoundingClientRect().top - 8) + "px";
+    marker.innerHTML = "<i></i><b>" + gap + "px 间距</b>";
+    rail.parentElement.appendChild(marker);
+  })();
+</script>
+</body>
+</html>

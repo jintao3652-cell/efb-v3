@@ -28,12 +28,14 @@ export function AirportGroundMap({ airport, data, selectedStand, onSelectStand }
     instance.addControl(new maplibregl.NavigationControl({ showCompass: true }), "top-right");
     instance.on("load", () => {
       instance.addSource("airport-runways", { type: "geojson", data: emptyCollection() });
+      instance.addSource("airport-runway-ends", { type: "geojson", data: emptyCollection() });
       instance.addSource("airport-gates", { type: "geojson", data: emptyCollection() });
       instance.addSource("airport-osm-ground", { type: "geojson", data: emptyCollection() });
       instance.addLayer({ id: "airport-runway-casing", type: "line", source: "airport-runways", paint: { "line-color": "#0b1822", "line-width": ["interpolate", ["linear"], ["zoom"], 13, 5, 17, 17] } });
       instance.addLayer({ id: "airport-runways", type: "line", source: "airport-runways", paint: { "line-color": "#d2dbe0", "line-width": ["interpolate", ["linear"], ["zoom"], 13, 2.5, 17, 11], "line-dasharray": [2, 1] } });
-      instance.addLayer({ id: "airport-runway-labels", type: "symbol", source: "airport-runways", minzoom: 13, layout: { "symbol-placement": "line", "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13, 12, 17, 17], "symbol-spacing": 360, "text-letter-spacing": .08, "text-allow-overlap": true, "text-rotation-alignment": "map", "text-pitch-alignment": "map" }, paint: { "text-color": "#58f3ff", "text-halo-color": "#071015", "text-halo-width": 2.6 } });
-      instance.addLayer({ id: "airport-osm-runway-labels", type: "symbol", source: "airport-osm-ground", minzoom: 13, filter: ["all", ["==", ["get", "kind"], "runway"], ["!=", ["get", "label"], ""]], layout: { "symbol-placement": "line", "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13, 12, 17, 17], "symbol-spacing": 360, "text-allow-overlap": false, "text-rotation-alignment": "map", "text-pitch-alignment": "map" }, paint: { "text-color": "#58f3ff", "text-halo-color": "#071015", "text-halo-width": 2.6 } });
+      // 跑道号显示在各自跑道头（端点标签），不再沿跑道线重复。
+      instance.addLayer({ id: "airport-runway-labels", type: "symbol", source: "airport-runway-ends", minzoom: 13, layout: { "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13, 12, 17, 17], "text-letter-spacing": .08, "text-allow-overlap": true, "text-ignore-placement": true }, paint: { "text-color": "#58f3ff", "text-halo-color": "#071015", "text-halo-width": 2.6 } });
+      instance.addLayer({ id: "airport-osm-runway-labels", type: "symbol", source: "airport-osm-ground", minzoom: 13, filter: ["==", ["get", "kind"], "runway-end"], layout: { "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13, 12, 17, 17], "text-allow-overlap": true, "text-ignore-placement": true }, paint: { "text-color": "#58f3ff", "text-halo-color": "#071015", "text-halo-width": 2.6 } });
       instance.addLayer({ id: "airport-taxiway-labels", type: "symbol", source: "airport-osm-ground", minzoom: 13.5, filter: ["all", ["in", ["get", "kind"], ["literal", ["taxiway", "taxilane"]]], ["!=", ["get", "label"], ""]], layout: { "symbol-placement": "line", "text-field": ["get", "label"], "text-size": ["interpolate", ["linear"], ["zoom"], 13.5, 10, 18, 15], "symbol-spacing": 115, "text-max-angle": 45, "text-allow-overlap": false, "text-rotation-alignment": "map", "text-pitch-alignment": "map", "text-keep-upright": true }, paint: { "text-color": "#f7fbff", "text-halo-color": "#071015", "text-halo-width": 2.4 } });
       instance.addLayer({ id: "airport-gates", type: "circle", source: "airport-gates", minzoom: 10, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 14.8, 5, 18, 7], "circle-color": ["case", ["==", ["get", "ref"], selectedStand], "#ffbd62", "#12d99b"], "circle-stroke-color": "#f1fff9", "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 1.2, 16, 2] } });
       instance.addLayer({ id: "airport-gate-labels", type: "symbol", source: "airport-gates", minzoom: 14, layout: { "text-field": ["get", "ref"], "text-size": ["interpolate", ["linear"], ["zoom"], 14, 9, 18, 12], "text-offset": [0, 1], "text-anchor": "top", "text-allow-overlap": false }, paint: { "text-color": "#12d99b", "text-halo-color": "#061a13", "text-halo-width": 1.8 } });
@@ -51,8 +53,14 @@ export function AirportGroundMap({ airport, data, selectedStand, onSelectStand }
     if (!mapReady || !instance?.isStyleLoaded() || !data) return;
     const gates = { type: "FeatureCollection" as const, features: data.gates.map((gate) => ({ type: "Feature" as const, properties: { ref: gate.gateRef, type: gate.gateType }, geometry: { type: "Point" as const, coordinates: [gate.longitude, gate.latitude] } })) };
     const runways = { type: "FeatureCollection" as const, features: data.runways.map((runway) => ({ type: "Feature" as const, properties: { label: `RW${runway.leIdent}  RW${runway.heIdent}` }, geometry: { type: "LineString" as const, coordinates: [[Number(runway.leLongitudeDeg), Number(runway.leLatitudeDeg)], [Number(runway.heLongitudeDeg), Number(runway.heLatitudeDeg)]] } })) };
+    // le/he 字段与两端坐标一一对应，跑道号直接放在各自跑道头。
+    const runwayEnds = { type: "FeatureCollection" as const, features: data.runways.flatMap((runway) => [
+      { type: "Feature" as const, properties: { label: `RW${runway.leIdent}` }, geometry: { type: "Point" as const, coordinates: [Number(runway.leLongitudeDeg), Number(runway.leLatitudeDeg)] } },
+      { type: "Feature" as const, properties: { label: `RW${runway.heIdent}` }, geometry: { type: "Point" as const, coordinates: [Number(runway.heLongitudeDeg), Number(runway.heLatitudeDeg)] } },
+    ]) };
     (instance.getSource("airport-gates") as maplibregl.GeoJSONSource | undefined)?.setData(gates);
     (instance.getSource("airport-runways") as maplibregl.GeoJSONSource | undefined)?.setData(runways);
+    (instance.getSource("airport-runway-ends") as maplibregl.GeoJSONSource | undefined)?.setData(runwayEnds);
     if (data.gates.length || data.runways.length) {
       const bounds = new maplibregl.LngLatBounds();
       data.gates.forEach((gate) => bounds.extend([gate.longitude, gate.latitude]));

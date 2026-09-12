@@ -1,5 +1,6 @@
 node_modules/
 .env
+.workbuddy/
 dist/
 src-tauri/target/
 src-tauri/target-check/

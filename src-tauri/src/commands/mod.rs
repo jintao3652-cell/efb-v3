@@ -18,7 +18,7 @@ pub use flightplan::{list_flight_plans, save_flight_plan};
 pub use navigation::{
     get_navigation_airport_details, get_navigation_airport_procedures,
     get_navigation_database_status, get_navigation_map_data, get_navigation_procedure_points,
-    search_navigation_airports, set_navigation_database,
+    get_navigation_runway_threshold, search_navigation_airports, set_navigation_database,
 };
 pub use simbrief::import_simbrief_flight;
 pub use weather::get_weather;

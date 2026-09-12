@@ -21,6 +21,9 @@ export interface SimBriefFlight {
   routePoints: FlightRoutePoint[];
 }
 
+/** 报告点类别（Jeppesen ENROUTE-7 图例键 §28）。后端接入前恒为 undefined。 */
+export type ReportingPointKind = "compulsory" | "non-compulsory" | "fly-over";
+
 export interface NavigationMapPoint {
   ident: string;
   name: string;
@@ -28,6 +31,7 @@ export interface NavigationMapPoint {
   iata: string;
   kind: string;
   symbol?: string;
+  reporting?: ReportingPointKind;
   latitude: number;
   longitude: number;
 }
@@ -41,15 +45,51 @@ export interface NavigationAirway {
   legs: Array<{
     coordinates: [[number, number], [number, number]];
     direction: string;
+    /** 航段高度层：L=低空 H=高空 B=双层；LNM 数据源为空串。 */
+    level: string;
     minimumAltitude: number | null;
     maximumAltitude: number | null;
   }>;
+}
+
+/** 等待航线（Jeppesen SYMBOLS-8, ROUTES & AIRWAYS — Holding Patterns）。 */
+export interface NavigationHoldingPattern {
+  ident: string;
+  name: string;
+  inboundCourse?: number | null;
+  /** "L" 左转 / "R" 右转 */
+  turnDirection?: string | null;
+  latitude: number;
+  longitude: number;
+}
+
+/** Grid MORA 网格单元（Jeppesen ENROUTE-7 §14）。altitudeFeet 为 null 表示 "Unsurveyed"。 */
+export interface NavigationMoraCell {
+  latitude: number;
+  longitude: number;
+  altitudeFeet: number | null;
+  /** 精度存疑，显示时数值后加 "±" */
+  doubtful?: boolean;
+}
+
+/** 特殊空域面（Jeppesen SYMBOLS-3, AIRSPACE & BOUNDARIES）。 */
+export interface NavigationSpecialUseAirspace {
+  id: string;
+  name: string;
+  airspaceType: string;
+  lowerLimit?: string | null;
+  upperLimit?: string | null;
+  coordinates: Array<[number, number]>;
 }
 
 export interface NavigationMapData {
   airports: NavigationMapPoint[];
   navaids: NavigationMapPoint[];
   airways: NavigationAirway[];
+  /** 以下三类后端在数据源接入前不返回（空集时字段缺省）。 */
+  holdingPatterns?: NavigationHoldingPattern[];
+  moraCells?: NavigationMoraCell[];
+  specialUseAirspace?: NavigationSpecialUseAirspace[];
 }
 
 export interface MapViewport {
@@ -120,6 +160,7 @@ export interface NavigationAirportProcedures {
   message: string;
   sids: NavigationProcedureSummary[];
   stars: NavigationProcedureSummary[];
+  approaches: NavigationProcedureSummary[];
 }
 
 export interface XflyAirportData {
@@ -215,13 +256,18 @@ export async function getNavigationAirportDetails(icao: string): Promise<Navigat
 }
 
 export async function getNavigationAirportProcedures(icao: string): Promise<NavigationAirportProcedures> {
-  if (!isTauri()) return { source: "lnm", ready: false, message: "浏览器模式不支持本地 SID/STAR 数据", sids: [], stars: [] };
+  if (!isTauri()) return { source: "lnm", ready: false, message: "浏览器模式不支持本地 SID/STAR 数据", sids: [], stars: [], approaches: [] };
   return invoke<NavigationAirportProcedures>("get_navigation_airport_procedures", { icao });
 }
 
 export async function getNavigationProcedurePoints(procedureId: number, runway?: string, transition?: string): Promise<FlightRoutePoint[]> {
   if (!isTauri()) return [];
   return invoke<FlightRoutePoint[]>("get_navigation_procedure_points", { procedureId, runway, transition });
+}
+
+export async function getNavigationRunwayThreshold(icao: string, runway: string): Promise<FlightRoutePoint | null> {
+  if (!isTauri()) return null;
+  return invoke<FlightRoutePoint | null>("get_navigation_runway_threshold", { icao, runway });
 }
 
 export async function getNavigationMapData(viewport: MapViewport): Promise<NavigationMapData> {

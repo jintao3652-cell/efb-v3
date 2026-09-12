@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Check, CircleAlert, CloudSun, MapPinned, PlaneTakeoff, Radio, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, CloudSun, MapPinned, PlaneTakeoff, Radio, ShieldCheck } from "lucide-react";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { loadVatsimSnapshot } from "../lib/airspace";
 import { getCurrentAiracCycle, getWeather, isTauri, listFlightPlans } from "../lib/tauri";
-import { useAppStore } from "../stores/app-store";
 
 const checklistItems = ["检查飞行计划与航路", "确认起降机场天气", "查看 NOTAM 与跑道状态", "下载所需航图至本地"];
 const checklistStorageKey = "skyboard-preflight-checklist";
@@ -25,14 +24,13 @@ function controllerRole(callsign: string) {
 }
 
 export function OverviewPage() {
-  const online = useAppStore((state) => state.online);
   const [checked, setChecked] = useState(initialChecklist);
   const flightPlans = useQuery({ queryKey: ["flight-plans"], queryFn: listFlightPlans });
   const currentPlan = flightPlans.data?.[0];
   const departure = currentPlan?.departure.trim().toUpperCase() ?? "";
-  const weather = useQuery({ queryKey: ["weather", departure, online], queryFn: () => getWeather(departure, !online), enabled: isTauri() && departure.length === 4, retry: 0, staleTime: 60_000 });
+  const weather = useQuery({ queryKey: ["weather", departure], queryFn: () => getWeather(departure), enabled: isTauri() && departure.length === 4, retry: 0, staleTime: 60_000 });
   const airac = useQuery({ queryKey: ["current-airac-cycle"], queryFn: getCurrentAiracCycle, enabled: isTauri(), retry: 0, staleTime: 12 * 60 * 60_000 });
-  const vatsim = useQuery({ queryKey: ["vatsim-live-snapshot"], queryFn: ({ signal }) => loadVatsimSnapshot(signal), retry: 0, staleTime: 12_000, refetchInterval: online ? 30_000 : false, networkMode: "always" });
+  const vatsim = useQuery({ queryKey: ["vatsim-live-snapshot"], queryFn: ({ signal }) => loadVatsimSnapshot(signal), retry: 0, staleTime: 12_000, refetchInterval: 30_000, networkMode: "always" });
   const chinaControllers = useMemo(() => (vatsim.data?.controllers ?? []).filter((controller) => controller.callsign.toUpperCase().startsWith("Z")), [vatsim.data?.controllers]);
   const completed = checked.filter(Boolean).length;
   const temperature = weather.data?.temperature.split("/")[0]?.trim() || "--";
@@ -55,6 +53,5 @@ export function OverviewPage() {
       <section className="panel quick-panel"><div className="panel-header"><div><p className="eyebrow">快速访问</p><h3>飞行工具</h3></div></div><div className="quick-actions"><Link to="/map"><MapPinned size={18} />航图地图</Link><Link to="/charts"><PlaneTakeoff size={18} />航图库</Link><Link to="/airports"><Radio size={18} />机场频率</Link></div></section>
     </div>
     <section className="panel checklist-panel"><div className="panel-header"><div><p className="eyebrow">起飞前</p><h3>快速检查清单</h3></div><span className="muted">{completed} / {checklistItems.length} 完成</span></div><div className="checklist">{checklistItems.map((item, index) => <button key={item} className={checked[index] ? "completed" : ""} onClick={() => toggleChecklist(index)} aria-pressed={checked[index]}><span><Check size={15} /></span>{item}</button>)}</div></section>
-    <div className="notice"><CircleAlert size={18} /><div><strong>{online ? "离线回退已启用" : "当前处于离线模式"}</strong><p>飞行计划、导航数据库与按机场保存的最近天气可继续使用；实时数据会在联网后恢复。</p></div></div>
   </div>;
 }

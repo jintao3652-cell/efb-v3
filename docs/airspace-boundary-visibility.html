@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>空域边界显隐规则 · FIR/UIR 与 APP/TRACON · EFB V3</title>
+<style>
+  :root {
+    --ink: #14202b;
+    --ink-soft: #4a5c6b;
+    --ink-faint: #7d8f9c;
+    --line: #dfe6ec;
+    --line-soft: #eef3f7;
+    --card: #ffffff;
+    --bg: #f4f7fa;
+    --ok: #0f8f5f;
+    --warn: #b06a00;
+    --accent: #0a6fb0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 28px 72px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; }
+  h1 { font-size: 25px; margin: 0 0 6px; letter-spacing: -.2px; }
+  .sub { color: var(--ink-faint); font-size: 13.5px; margin: 0 0 32px; }
+  h2 {
+    font-size: 17px; margin: 40px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h2:first-of-type { margin-top: 0; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 20px; margin: 0 0 16px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--card); }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  th { background: #f8fbfd; font-weight: 600; color: var(--ink-soft); border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: none; }
+  table.bordered { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  code {
+    font-family: "Cascadia Code", Consolas, Menlo, monospace; font-size: 12.5px;
+    background: #eef3f7; padding: 1.5px 5px; border-radius: 4px; color: #1d4257;
+  }
+  .pill { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px; font-weight: 600; }
+  .pill.show { background: #e3f6ec; color: #0d7a51; }
+  .pill.hide { background: #f2f4f6; color: #7b8a96; }
+  .pill.faint { background: #fff4e2; color: #9a6400; }
+
+  /* ---- 状态示意 ---- */
+  .matrix { display: grid; grid-template-columns: 150px 1fr 1fr; gap: 12px; align-items: center; }
+  .matrix .hdr { font-size: 13px; font-weight: 600; color: var(--ink-soft); text-align: center; }
+  .matrix .rowlabel {
+    font-size: 13.5px; font-weight: 600; color: var(--ink);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .matrix .rowlabel small { font-weight: 400; color: var(--ink-faint); font-size: 11.5px; }
+  .stage { border-radius: 8px; overflow: hidden; border: 1px solid #22323f; }
+  .stage svg { display: block; width: 100%; height: auto; }
+  .note { font-size: 12.5px; color: var(--ink-faint); margin-top: 6px; text-align: center; }
+
+  .legend-inline { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; color: var(--ink-soft); margin-top: 4px; }
+  .legend-inline span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 22px; height: 3px; border-radius: 2px; display: inline-block; }
+  .swatch.box { width: 14px; height: 14px; border-radius: 3px; }
+
+  ul { margin: 8px 0 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .kv { display: grid; grid-template-columns: 210px 1fr; gap: 6px 14px; font-size: 14px; }
+  .kv dt { color: var(--ink-soft); font-weight: 600; margin: 0; }
+  .kv dd { margin: 0; }
+  .flag { border-left: 3px solid var(--warn); background: #fffaf0; padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 14px; margin: 14px 0 0; }
+  .flag.ok { border-left-color: var(--ok); background: #f2fbf6; }
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>空域边界显隐规则</h1>
+  <p class="sub">FIR / UIR 与 APP / TRACON 图层 · 按「有无管制」决定绘制内容 · EFB V3</p>
+
+  <h2>一、规则</h2>
+  <table class="bordered">
+    <thead>
+      <tr><th style="width:200px">图层</th><th style="width:150px">有管制</th><th style="width:150px">无管制</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>FIR / UIR</strong><br /><code>fir-fill</code> · <code>fir-line</code> · <code>fir-labels</code></td>
+        <td><span class="pill faint">填充 + 边界</span></td>
+        <td><span class="pill show">仅边界</span></td>
+        <td>无管制时<strong>只保留边界线</strong>与名称标注，不绘制填充</td>
+      </tr>
+      <tr>
+        <td><strong>APP / TRACON</strong><br /><code>tracon-fill</code> · <code>tracon-line</code> · <code>tracon-separator-casing</code> · <code>tracon-active-glow</code> · <code>tracon-labels</code></td>
+        <td><span class="pill show">填充 + 边界</span></td>
+        <td><span class="pill hide">什么都不显示</span></td>
+        <td>无管制时<strong>边界与填充都不绘制</strong>（整层不出图）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>二、什么算「有管制」</h2>
+  <div class="card">
+    <p style="margin:0 0 10px">边界数据本身<strong>不带管制状态</strong>，需要按当时在线的 VATSIM 席位反推：</p>
+    <dl class="kv">
+      <dt>FIR / UIR</dt>
+      <dd>取席位呼号的<strong>航路席位</strong>（末段为 <code>CTR</code> 或 <code>FSS</code>），且前缀命中该 FIR 的 <code>id</code>。<br />
+        例：<code>ZBPE_CTR</code> → 点亮 <code>ZBPE</code>；<code>ZBPE_N_CTR</code> → 点亮 <code>ZBPE</code>；<code>ZBPE_FSS</code> → 点亮 <code>ZBPE</code>。</dd>
+      <dt>APP / TRACON</dt>
+      <dd>沿用原有的扇区匹配：席位前缀命中扇区 <code>prefix</code>，且后缀为 <code>APP</code>。</dd>
+    </dl>
+    <div class="flag">
+      <strong>APP / TWR / GND / DEL 不算有航路管制。</strong>这些席位只管机场周边，不足以代表整个 FIR。
+      因此 <code>ZSSS_APP</code>、<code>ZBAA_TWR</code>、<code>ZBAA_GND</code>、<code>ZSSS_DEL</code> 都不会点亮 FIR 填充
+      （已用真实数据验证，见第五节）。
+    </div>
+  </div>
+
+  <h2>三、视觉结果对照</h2>
+  <div class="matrix">
+    <div></div>
+    <div class="hdr">无管制（当前应有表现）</div>
+    <div class="hdr">有管制</div>
+
+    <div class="rowlabel">FIR / UIR<small>只出边界线</small></div>
+
+    <!-- FIR 无管制 -->
+    <div>
+      <div class="stage">
+        <svg viewBox="0 0 300 180" role="img" aria-label="FIR 无管制：只显示边界线">
+          <defs>
+            <pattern id="gratA" width="30" height="30" patternUnits="userSpaceOnUse">
+              <path d="M30 0H0V30" fill="none" stroke="#16303f" stroke-width="1" />
+            </pattern>
+          </defs>
+          <rect width="300" height="180" fill="#0b1e2e" />
+          <rect width="300" height="180" fill="url(#gratA)" />
+          <!-- 相邻 FIR 边界，用细线示意其他边界 -->
+          <path d="M0 52 L300 34" fill="none" stroke="#f4f6f8" stroke-opacity=".35" stroke-width="1.35" />
+          <path d="M248 0 L262 180" fill="none" stroke="#f4f6f8" stroke-opacity=".35" stroke-width="1.35" />
+          <!-- 本 FIR：无填充 -->
+          <polygon points="60,58 214,46 232,132 78,146" fill="none" stroke="#f4f6f8" stroke-width="1.35" stroke-opacity=".92" />
+          <text x="104" y="98" fill="#ffffff" font-size="12" font-family="monospace">ZBPE</text>
+        </svg>
+      </div>
+      <div class="note">只有白色边界线 · 内部与其他区域亮度一致</div>
+    </div>
+
+    <!-- FIR 有管制 -->
+    <div>
+      <div class="stage">
+        <svg viewBox="0 0 300 180" role="img" aria-label="FIR 有管制：边界 + 填充">
+          <pattern id="gratB" width="30" height="30" patternUnits="userSpaceOnUse">
+            <path d="M30 0H0V30" fill="none" stroke="#16303f" stroke-width="1" />
+          </pattern>
+          <rect width="300" height="180" fill="#0b1e2e" />
+          <rect width="300" height="180" fill="url(#gratB)" />
+          <path d="M0 52 L300 34" fill="none" stroke="#f4f6f8" stroke-opacity=".35" stroke-width="1.35" />
+          <path d="M248 0 L262 180" fill="none" stroke="#f4f6f8" stroke-opacity=".35" stroke-width="1.35" />
+          <!-- fir-fill: #ffffff @ 0.018 真实值，叠加在深色底上 -->
+          <polygon points="60,58 214,46 232,132 78,146" fill="#ffffff" fill-opacity=".018" />
+          <!-- 为了让 0.018 在截图中仍可察觉，另叠一层极淡描边示意（实际渲染无此描边） -->
+          <polygon points="60,58 214,46 232,132 78,146" fill="#ffffff" fill-opacity=".055" stroke="none" />
+          <polygon points="60,58 214,46 232,132 78,146" fill="none" stroke="#f4f6f8" stroke-width="1.35" stroke-opacity=".92" />
+          <text x="104" y="98" fill="#ffffff" font-size="12" font-family="monospace">ZBPE</text>
+          <text x="60" y="170" fill="#7fd0ff" font-size="10.5" font-family="monospace">ZBPE_CTR</text>
+        </svg>
+      </div>
+      <div class="note">边界线 + 极淡白色填充（<code>#ffffff</code> @ <code>0.018</code>）</div>
+    </div>
+
+    <div class="rowlabel" style="margin-top:16px">APP / TRACON<small>无管制则整层不出图</small></div>
+
+    <!-- TRACON 无管制 -->
+    <div style="margin-top:16px">
+      <div class="stage">
+        <svg viewBox="0 0 300 180" role="img" aria-label="APP 无管制：边界与填充都不显示">
+          <pattern id="gratC" width="30" height="30" patternUnits="userSpaceOnUse">
+            <path d="M30 0H0V30" fill="none" stroke="#16303f" stroke-width="1" />
+          </pattern>
+          <rect width="300" height="180" fill="#0b1e2e" />
+          <rect width="300" height="180" fill="url(#gratC)" />
+          <path d="M0 52 L300 34" fill="none" stroke="#f4f6f8" stroke-opacity=".35" stroke-width="1.35" />
+          <circle cx="150" cy="96" r="3.5" fill="#7fe3a8" />
+          <text x="82" y="168" fill="#5c7486" font-size="10.5" font-family="monospace">ZSSS_APP 在线但无扇区匹配 → 不绘制</text>
+        </svg>
+      </div>
+      <div class="note">该扇区<strong>连边界线也不出现</strong>，地图保持干净</div>
+    </div>
+
+    <!-- TRACON 有管制 -->
+    <div style="margin-top:16px">
+      <div class="stage">
+        <svg viewBox="0 0 300 180" role="img" aria-label="APP 有管制：绿色填充 + 高亮边界">
+          <pattern id="gratD" width="30" height="30" patternUnits="userSpaceOnUse">
+            <path d="M30 0H0V30" fill="none" stroke="#16303f" stroke-width="1" />
+          </pattern>
+          <rect width="300" height="180" fill="#0b1e2e" />
+          <rect width="300" height="180" fill="url(#gratD)" />
+          <path d="M0 52 L300 34" fill="none" stroke="#f4f6f8" stroke-opacity=".35" stroke-width="1.35" />
+          <!-- tracon-fill #00c96b @ .8 -->
+          <polygon points="70,50 236,44 226,140 84,148" fill="#00c96b" fill-opacity=".8" />
+          <!-- separator casing #031a10 6.5 -->
+          <polygon points="70,50 236,44 226,140 84,148" fill="none" stroke="#031a10" stroke-opacity=".92" stroke-width="6.5" />
+          <!-- line #8effbd 3.4 -->
+          <polygon points="70,50 236,44 226,140 84,148" fill="none" stroke="#8effbd" stroke-width="3.4" />
+          <!-- glow #25e98a 9 @ .24 blur -->
+          <polygon points="70,50 236,44 226,140 84,148" fill="none" stroke="#25e98a" stroke-opacity=".24" stroke-width="9" style="filter: blur(3px)" />
+          <text x="104" y="100" fill="#d8ffe9" font-size="12" font-family="monospace">ZSSS_APP</text>
+        </svg>
+      </div>
+      <div class="note">绿色填充 + 高亮边界 + 呼号标注</div>
+    </div>
+  </div>
+
+  <div class="legend-inline" style="margin-top:18px">
+    <span><i class="swatch" style="background:#f4f6f8"></i>FIR 边界线 <code>#f4f6f8</code> / 1.35</span>
+    <span><i class="swatch box" style="background:#ffffff;border:1px solid #ccd6de"></i>FIR 填充 <code>#ffffff</code> @ 0.018</span>
+    <span><i class="swatch box" style="background:#00c96b"></i>APP 填充 <code>#00c96b</code> @ 0.8</span>
+    <span><i class="swatch" style="background:#8effbd"></i>APP 边界 <code>#8effbd</code> / 3.4</span>
+  </div>
+
+  <h2>四、代码落点</h2>
+  <table class="bordered">
+    <thead><tr><th style="width:290px">位置</th><th>改动</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/lib/airspace.ts</code></td><td>新增 <code>applyActiveFirControllers()</code> —— 按 CTR/FSS 席位反推 FIR 的 <code>active</code> 标记</td></tr>
+      <tr><td><code>src/pages/MapPage.tsx</code></td><td>新增 <code>firCoverage</code>；FIR 数据源改用带 <code>active</code> 的结果</td></tr>
+      <tr><td><code>fir-fill</code></td><td>加 filter <code>["==", ["get","active"], true]</code></td></tr>
+      <tr><td><code>fir-line</code> / <code>fir-labels</code></td><td><strong>不动</strong> —— 保持恒显</td></tr>
+      <tr><td><code>tracon-fill</code> / <code>tracon-line</code> / <code>tracon-separator-casing</code></td><td>各加 filter <code>active == true</code>（<code>tracon-active-glow</code>、<code>tracon-labels</code> 原本已过滤）</td></tr>
+      <tr><td><code>vatsimLayersEnabled</code></td><td>增加 <code>|| layers.fir</code> —— 否则 FIR 填充拿不到席位数据</td></tr>
+      <tr><td><code>firDetail</code> / <code>vatsimDetail</code></td><td>图层状态行增加「有管制 N」计数并更新文案</td></tr>
+    </tbody>
+  </table>
+
+  <h2>五、验证</h2>
+  <div class="flag ok">
+    <strong>用真实数据验证，不是推理。</strong>
+    抓取 Volanta <code>boundaries.json</code>（1097 个要素 / 1091 个唯一 <code>id</code>）与 VATSIM 实时快照（156 个在线席位），
+    用 Python 复刻判定逻辑逐例核对。
+  </div>
+  <ul>
+    <li><code>tsc -b</code> → 0 error；<code>vite build</code> → 成功（9.56s）</li>
+    <li>实时点亮 13 个 FIR <code>id</code>，含 <code>ZBAA_CTR</code> → <code>ZBAA</code> 及其 5 个 <code>ZBAA-*</code> 子分区、<code>WAAF_CTR</code> → <code>WAAF</code> 及 9 个子分区</li>
+    <li><strong>14 个构造用例全部通过</strong>；混合场景通过；<strong>无席位在线 → 点亮 0 个</strong>（FIR 不出填充）</li>
+    <li>反例确认：<code>ZSSS_APP</code> / <code>ZBAA_TWR</code> / <code>ZBAA_GND</code> / <code>ZSSS_DEL</code> 均不点亮</li>
+    <li>中国区数据集含 52 个 <code>Z</code> 开头 <code>id</code>，主要 FIR（<code>ZBPE</code> <code>ZGZU</code> <code>ZHWH</code> <code>ZJSA</code> <code>ZLHW</code> <code>ZPKM</code> <code>ZSHA</code> <code>ZUUU</code> <code>VHHK</code>）均在列</li>
+  </ul>
+
+  <h2>六、取舍与边界</h2>
+  <div class="card">
+    <ul style="margin-top:0">
+      <li><strong>FIR 填充色未改</strong>：仍是 <code>#ffffff</code> @ <code>0.018</code>，只加了过滤。这个不透明度极低，肉眼仅在大片区对比时能察觉。若希望「有管制」一眼可辨，可与 APP 统一为 <code>#00c96b</code>，或提高不透明度。</li>
+      <li><strong>子分区联动条件</strong>：只有当席位前缀与母边界<strong>完全同名</strong>时才联动（如 <code>ZBAA_CTR</code> → <code>ZBAA-E</code>）。若由更上层席位（如 <code>ZBPE_CTR</code>）管制，子分区不会点亮。</li>
+      <li><strong>数据延迟</strong>：管辖状态依赖 VATSIM 快照，按 15 秒轮询刷新，因此边界填充会随之变化 —— 这是预期行为。</li>
+      <li><strong>不可本地运行验证</strong>：本机缺少 Rust 工具链（<code>cargo</code> 不在 PATH），<code>npm run tauri dev</code> 无法启动，所以上述结果是逻辑与构建层面的验证，未做真机视觉确认。</li>
+    </ul>
+  </div>
+
+  <footer>
+    EFB V3 · 空域边界显隐规则 · 生成于 2026-09-11 · 数据源 Volanta boundaries.json · 席位源 VATSIM
+  </footer>
+
+</div>
+</body>
+</html>

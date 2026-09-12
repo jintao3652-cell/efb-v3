@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8" /><title>显示在线管制 — 配色预览</title>
+<style>
+  html, body { margin: 0; background: #141414; color: #e8f0f5; font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; }
+  .wrap { display: flex; gap: 18px; padding: 18px; }
+  .map { position: relative; width: 900px; height: 620px; background: #1b1e22; border: 1px solid #3a3a3a; border-radius: 10px; overflow: hidden; }
+  .map svg { display: block; }
+  .rail { width: 340px; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: #1b1f22; border: 1px solid #2c3338; border-radius: 10px; padding: 14px 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: .04em; color: #9fb4c2; font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 0; }
+  .row em { font-style: normal; margin-left: auto; color: #6f8794; font-size: 12px; }
+  .sw { width: 34px; height: 18px; border-radius: 4px; border: 1px solid #46525a; flex: 0 0 auto; }
+  .sw.sector { background: rgba(222,241,215,.7); border-color: #74bd57; }
+  .sw.ref { width: 120px; background: #def1d7; border-color: #74bd57; }
+  .tiny { font-size: 12px; color: #7d919d; line-height: 1.7; }
+  code { color: #b9e6ff; }
+</style></head>
+<body><div class="wrap">
+  <div class="map">
+    <svg width="900" height="620" viewBox="0 0 900 620">
+      <path d="M-262.0 297.4 L-152.1 217.7 L-136.6 206.6 L-75.2 162.9 L82.5 53.1 L161.7 48.1 L215.0 109.6 L318.2 173.7 L318.2 183.2 L318.2 214.0 L287.5 229.0 L279.8 235.4 L324.1 264.0 L338.4 295.6 L315.8 330.5 L239.8 329.2 L237.8 313.6 L182.0 328.7 L104.7 350.4 L76.9 359.3 L93.7 418.9 L96.4 429.0 L123.7 527.4 L65.6 544.3 L-110.1 596.7 L-262.0 297.4 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M237.8 313.6 L182.0 328.7 L104.7 350.4 L76.9 359.3 L93.7 418.9 L96.4 429.0 L123.7 527.4 L155.6 518.2 L217.2 500.7 L225.0 498.6 L296.8 479.0 L296.3 435.2 L295.6 363.9 L315.8 330.5 L239.8 329.2 L237.8 313.6 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M65.6 544.3 L123.7 527.4 L155.6 518.2 L217.2 500.7 L225.0 498.6 L296.8 479.0 L690.0 377.7 L690.0 435.9 L690.0 458.1 L691.7 459.9 L728.7 498.3 L728.4 527.1 L710.9 543.2 L666.4 619.0 L659.1 631.6 L434.5 654.9 L397.4 659.0 L306.7 698.4 L273.8 804.7 L254.0 810.9 L179.0 834.7 L75.4 867.6 L23.9 851.6 L-287.0 754.7 L-110.1 596.7 L65.6 544.3 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M161.7 48.1 L215.0 109.6 L318.2 173.7 L318.2 183.2 L318.2 214.0 L428.2 212.1 L627.4 152.8 L562.0 46.1 L551.6 29.2 L161.7 48.1 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M219.8 -277.9 L153.4 -282.4 L128.8 -278.0 L118.9 -260.8 L87.6 -245.0 L77.0 -235.8 L59.8 -233.7 L42.7 -225.4 L28.4 -217.7 L12.5 -220.0 L-31.8 -222.1 L-40.6 -224.9 L-89.2 -234.0 L-95.5 -241.0 L-109.5 -248.7 L-121.5 -247.6 L-146.6 -248.2 L-157.9 -249.9 L-179.8 -241.7 L-205.4 -211.6 L-216.1 -192.8 L-222.5 -179.1 L-194.1 -151.9 L-171.1 -141.4 L-169.6 -135.8 L-160.3 -126.2 L-166.7 -118.4 L-181.8 -116.7 L-203.6 -100.6 L-218.8 -100.6 L-222.8 -99.0 L-229.1 -96.0 L-269.4 -84.6 L-305.0 -59.7 L-315.0 -47.6 L-333.0 -34.4 L-359.1 -27.0 L-370.4 -22.3 L-389.0 -21.9 L-433.8 -6.7 L-459.8 -2.7 L-493.5 -5.1 L-515.5 -0.3 L-546.6 -3.6 L-572.2 -3.3 L-580.6 -5.5 L-613.2 -1.4 L-655.8 -0.9 L-662.8 -5.2 L-688.7 -1.0 L-694.3 4.2 L-744.5 9.5 L-919.2 58.9 L-610.8 293.0 L-468.8 293.9 L-348.9 295.6 L-262.0 297.4 L-152.1 217.7 L-136.6 206.6 L-75.2 162.9 L82.5 53.1 L161.7 48.1 L551.6 29.2 L526.9 13.6 L463.1 -77.2 L219.8 -277.9 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M318.2 214.0 L287.5 229.0 L279.8 235.4 L324.1 264.0 L338.4 295.6 L315.8 330.5 L295.6 363.9 L296.3 435.2 L296.8 479.0 L690.0 377.7 L742.5 365.0 L731.3 279.0 L727.5 257.4 L669.4 222.5 L627.4 152.8 L428.2 212.1 L318.2 214.0 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M-1065.6 1071.1 L-1053.8 1080.9 L-1033.8 1090.1 L-1028.0 1090.0 L-990.0 1087.1 L-961.0 1085.2 L-948.5 1084.5 L-930.8 1092.6 L-911.7 1091.2 L-864.4 1091.2 L-867.2 1142.6 L-897.6 1174.2 L-948.1 1157.3 L-957.8 1157.5 L-1022.5 1158.3 L-1063.6 1158.3 L-1065.6 1071.1 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M374.6 274.3 L378.1 291.8 L379.5 298.7 L335.0 330.9 L520.8 335.8 L521.4 294.6 L461.3 287.3 L440.2 263.7 L398.7 270.4 L374.6 274.3 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M333.6 231.1 L338.7 257.0 L300.3 259.5 L291.0 212.1 L329.3 209.4 L333.6 231.1 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M339.7 176.6 L354.1 175.7 L360.7 207.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 L333.6 231.1 L329.3 209.4 L291.0 212.1 L284.8 180.2 L339.7 176.6 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M339.7 176.6 L284.8 180.2 L291.0 212.1 L300.3 259.5 L229.1 242.9 L239.7 175.8 L339.7 176.6 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M300.3 259.5 L307.6 296.6 L345.9 294.0 L338.7 257.0 L300.3 259.5 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M338.7 257.0 L345.9 294.0 L378.1 291.8 L374.6 274.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M300.3 259.5 L307.6 296.6 L345.9 294.0 L378.1 291.8 L379.5 298.7 L335.0 330.9 L315.8 330.5 L239.8 329.2 L237.8 313.6 L229.1 242.9 L300.3 259.5 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M374.6 274.3 L378.1 291.8 L379.5 298.7 L335.0 330.9 L520.8 335.8 L521.4 294.6 L461.3 287.3 L440.2 263.7 L398.7 270.4 L374.6 274.3 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M387.1 248.7 L398.7 270.4 L374.6 274.3 L370.3 253.6 L360.7 207.3 L354.1 175.7 L388.9 173.6 L394.6 205.2 L401.7 244.5 L387.1 248.7 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M428.2 212.1 L440.2 263.7 L398.7 270.4 L387.1 248.7 L401.7 244.5 L394.6 205.2 L388.9 173.6 L354.1 175.7 L339.7 176.6 L354.6 160.8 L356.2 145.4 L436.7 151.0 L421.3 183.0 L428.2 212.1 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M333.6 231.1 L338.7 257.0 L356.9 255.8 L351.7 229.9 L333.6 231.1 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M338.7 257.0 L345.9 294.0 L378.1 291.8 L374.6 274.3 L398.7 270.4 L387.1 248.7 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M333.6 231.1 L338.7 257.0 L345.9 294.0 L307.6 296.6 L300.3 259.5 L291.0 212.1 L329.3 209.4 L333.6 231.1 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M333.6 231.1 L338.7 257.0 L356.9 255.8 L351.7 229.9 L333.6 231.1 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M387.1 248.7 L370.3 253.6 L360.7 207.3 L354.1 175.7 L388.9 173.6 L394.6 205.2 L401.7 244.5 L387.1 248.7 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M339.7 176.6 L354.1 175.7 L360.7 207.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L351.7 229.9 L333.6 231.1 L329.3 209.4 L291.0 212.1 L284.8 180.2 L339.7 176.6 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M879.4 921.2 L899.6 920.6 L902.4 958.3 L882.4 958.9 L879.4 921.2 Z" fill="#def1d7" fill-opacity="0.7" />
+      <path d="M-262.0 297.4 L-152.1 217.7 L-136.6 206.6 L-75.2 162.9 L82.5 53.1 L161.7 48.1 L215.0 109.6 L318.2 173.7 L318.2 183.2 L318.2 214.0 L287.5 229.0 L279.8 235.4 L324.1 264.0 L338.4 295.6 L315.8 330.5 L239.8 329.2 L237.8 313.6 L182.0 328.7 L104.7 350.4 L76.9 359.3 L93.7 418.9 L96.4 429.0 L123.7 527.4 L65.6 544.3 L-110.1 596.7 L-262.0 297.4 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M237.8 313.6 L182.0 328.7 L104.7 350.4 L76.9 359.3 L93.7 418.9 L96.4 429.0 L123.7 527.4 L155.6 518.2 L217.2 500.7 L225.0 498.6 L296.8 479.0 L296.3 435.2 L295.6 363.9 L315.8 330.5 L239.8 329.2 L237.8 313.6 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M65.6 544.3 L123.7 527.4 L155.6 518.2 L217.2 500.7 L225.0 498.6 L296.8 479.0 L690.0 377.7 L690.0 435.9 L690.0 458.1 L691.7 459.9 L728.7 498.3 L728.4 527.1 L710.9 543.2 L666.4 619.0 L659.1 631.6 L434.5 654.9 L397.4 659.0 L306.7 698.4 L273.8 804.7 L254.0 810.9 L179.0 834.7 L75.4 867.6 L23.9 851.6 L-287.0 754.7 L-110.1 596.7 L65.6 544.3 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M161.7 48.1 L215.0 109.6 L318.2 173.7 L318.2 183.2 L318.2 214.0 L428.2 212.1 L627.4 152.8 L562.0 46.1 L551.6 29.2 L161.7 48.1 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M219.8 -277.9 L153.4 -282.4 L128.8 -278.0 L118.9 -260.8 L87.6 -245.0 L77.0 -235.8 L59.8 -233.7 L42.7 -225.4 L28.4 -217.7 L12.5 -220.0 L-31.8 -222.1 L-40.6 -224.9 L-89.2 -234.0 L-95.5 -241.0 L-109.5 -248.7 L-121.5 -247.6 L-146.6 -248.2 L-157.9 -249.9 L-179.8 -241.7 L-205.4 -211.6 L-216.1 -192.8 L-222.5 -179.1 L-194.1 -151.9 L-171.1 -141.4 L-169.6 -135.8 L-160.3 -126.2 L-166.7 -118.4 L-181.8 -116.7 L-203.6 -100.6 L-218.8 -100.6 L-222.8 -99.0 L-229.1 -96.0 L-269.4 -84.6 L-305.0 -59.7 L-315.0 -47.6 L-333.0 -34.4 L-359.1 -27.0 L-370.4 -22.3 L-389.0 -21.9 L-433.8 -6.7 L-459.8 -2.7 L-493.5 -5.1 L-515.5 -0.3 L-546.6 -3.6 L-572.2 -3.3 L-580.6 -5.5 L-613.2 -1.4 L-655.8 -0.9 L-662.8 -5.2 L-688.7 -1.0 L-694.3 4.2 L-744.5 9.5 L-919.2 58.9 L-610.8 293.0 L-468.8 293.9 L-348.9 295.6 L-262.0 297.4 L-152.1 217.7 L-136.6 206.6 L-75.2 162.9 L82.5 53.1 L161.7 48.1 L551.6 29.2 L526.9 13.6 L463.1 -77.2 L219.8 -277.9 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M318.2 214.0 L287.5 229.0 L279.8 235.4 L324.1 264.0 L338.4 295.6 L315.8 330.5 L295.6 363.9 L296.3 435.2 L296.8 479.0 L690.0 377.7 L742.5 365.0 L731.3 279.0 L727.5 257.4 L669.4 222.5 L627.4 152.8 L428.2 212.1 L318.2 214.0 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M-1065.6 1071.1 L-1053.8 1080.9 L-1033.8 1090.1 L-1028.0 1090.0 L-990.0 1087.1 L-961.0 1085.2 L-948.5 1084.5 L-930.8 1092.6 L-911.7 1091.2 L-864.4 1091.2 L-867.2 1142.6 L-897.6 1174.2 L-948.1 1157.3 L-957.8 1157.5 L-1022.5 1158.3 L-1063.6 1158.3 L-1065.6 1071.1 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M374.6 274.3 L378.1 291.8 L379.5 298.7 L335.0 330.9 L520.8 335.8 L521.4 294.6 L461.3 287.3 L440.2 263.7 L398.7 270.4 L374.6 274.3 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L300.3 259.5 L291.0 212.1 L329.3 209.4 L333.6 231.1 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M339.7 176.6 L354.1 175.7 L360.7 207.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 L333.6 231.1 L329.3 209.4 L291.0 212.1 L284.8 180.2 L339.7 176.6 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M339.7 176.6 L284.8 180.2 L291.0 212.1 L300.3 259.5 L229.1 242.9 L239.7 175.8 L339.7 176.6 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M300.3 259.5 L307.6 296.6 L345.9 294.0 L338.7 257.0 L300.3 259.5 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M338.7 257.0 L345.9 294.0 L378.1 291.8 L374.6 274.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M300.3 259.5 L307.6 296.6 L345.9 294.0 L378.1 291.8 L379.5 298.7 L335.0 330.9 L315.8 330.5 L239.8 329.2 L237.8 313.6 L229.1 242.9 L300.3 259.5 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M374.6 274.3 L378.1 291.8 L379.5 298.7 L335.0 330.9 L520.8 335.8 L521.4 294.6 L461.3 287.3 L440.2 263.7 L398.7 270.4 L374.6 274.3 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M387.1 248.7 L398.7 270.4 L374.6 274.3 L370.3 253.6 L360.7 207.3 L354.1 175.7 L388.9 173.6 L394.6 205.2 L401.7 244.5 L387.1 248.7 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M428.2 212.1 L440.2 263.7 L398.7 270.4 L387.1 248.7 L401.7 244.5 L394.6 205.2 L388.9 173.6 L354.1 175.7 L339.7 176.6 L354.6 160.8 L356.2 145.4 L436.7 151.0 L421.3 183.0 L428.2 212.1 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L356.9 255.8 L351.7 229.9 L333.6 231.1 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M338.7 257.0 L345.9 294.0 L378.1 291.8 L374.6 274.3 L398.7 270.4 L387.1 248.7 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L345.9 294.0 L307.6 296.6 L300.3 259.5 L291.0 212.1 L329.3 209.4 L333.6 231.1 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L356.9 255.8 L351.7 229.9 L333.6 231.1 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M387.1 248.7 L370.3 253.6 L360.7 207.3 L354.1 175.7 L388.9 173.6 L394.6 205.2 L401.7 244.5 L387.1 248.7 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M339.7 176.6 L354.1 175.7 L360.7 207.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L351.7 229.9 L333.6 231.1 L329.3 209.4 L291.0 212.1 L284.8 180.2 L339.7 176.6 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M879.4 921.2 L899.6 920.6 L902.4 958.3 L882.4 958.9 L879.4 921.2 Z" fill="none" stroke="#3d7a2a" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" />
+      <path d="M-262.0 297.4 L-152.1 217.7 L-136.6 206.6 L-75.2 162.9 L82.5 53.1 L161.7 48.1 L215.0 109.6 L318.2 173.7 L318.2 183.2 L318.2 214.0 L287.5 229.0 L279.8 235.4 L324.1 264.0 L338.4 295.6 L315.8 330.5 L239.8 329.2 L237.8 313.6 L182.0 328.7 L104.7 350.4 L76.9 359.3 L93.7 418.9 L96.4 429.0 L123.7 527.4 L65.6 544.3 L-110.1 596.7 L-262.0 297.4 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M237.8 313.6 L182.0 328.7 L104.7 350.4 L76.9 359.3 L93.7 418.9 L96.4 429.0 L123.7 527.4 L155.6 518.2 L217.2 500.7 L225.0 498.6 L296.8 479.0 L296.3 435.2 L295.6 363.9 L315.8 330.5 L239.8 329.2 L237.8 313.6 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M65.6 544.3 L123.7 527.4 L155.6 518.2 L217.2 500.7 L225.0 498.6 L296.8 479.0 L690.0 377.7 L690.0 435.9 L690.0 458.1 L691.7 459.9 L728.7 498.3 L728.4 527.1 L710.9 543.2 L666.4 619.0 L659.1 631.6 L434.5 654.9 L397.4 659.0 L306.7 698.4 L273.8 804.7 L254.0 810.9 L179.0 834.7 L75.4 867.6 L23.9 851.6 L-287.0 754.7 L-110.1 596.7 L65.6 544.3 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M161.7 48.1 L215.0 109.6 L318.2 173.7 L318.2 183.2 L318.2 214.0 L428.2 212.1 L627.4 152.8 L562.0 46.1 L551.6 29.2 L161.7 48.1 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M219.8 -277.9 L153.4 -282.4 L128.8 -278.0 L118.9 -260.8 L87.6 -245.0 L77.0 -235.8 L59.8 -233.7 L42.7 -225.4 L28.4 -217.7 L12.5 -220.0 L-31.8 -222.1 L-40.6 -224.9 L-89.2 -234.0 L-95.5 -241.0 L-109.5 -248.7 L-121.5 -247.6 L-146.6 -248.2 L-157.9 -249.9 L-179.8 -241.7 L-205.4 -211.6 L-216.1 -192.8 L-222.5 -179.1 L-194.1 -151.9 L-171.1 -141.4 L-169.6 -135.8 L-160.3 -126.2 L-166.7 -118.4 L-181.8 -116.7 L-203.6 -100.6 L-218.8 -100.6 L-222.8 -99.0 L-229.1 -96.0 L-269.4 -84.6 L-305.0 -59.7 L-315.0 -47.6 L-333.0 -34.4 L-359.1 -27.0 L-370.4 -22.3 L-389.0 -21.9 L-433.8 -6.7 L-459.8 -2.7 L-493.5 -5.1 L-515.5 -0.3 L-546.6 -3.6 L-572.2 -3.3 L-580.6 -5.5 L-613.2 -1.4 L-655.8 -0.9 L-662.8 -5.2 L-688.7 -1.0 L-694.3 4.2 L-744.5 9.5 L-919.2 58.9 L-610.8 293.0 L-468.8 293.9 L-348.9 295.6 L-262.0 297.4 L-152.1 217.7 L-136.6 206.6 L-75.2 162.9 L82.5 53.1 L161.7 48.1 L551.6 29.2 L526.9 13.6 L463.1 -77.2 L219.8 -277.9 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M318.2 214.0 L287.5 229.0 L279.8 235.4 L324.1 264.0 L338.4 295.6 L315.8 330.5 L295.6 363.9 L296.3 435.2 L296.8 479.0 L690.0 377.7 L742.5 365.0 L731.3 279.0 L727.5 257.4 L669.4 222.5 L627.4 152.8 L428.2 212.1 L318.2 214.0 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M-1065.6 1071.1 L-1053.8 1080.9 L-1033.8 1090.1 L-1028.0 1090.0 L-990.0 1087.1 L-961.0 1085.2 L-948.5 1084.5 L-930.8 1092.6 L-911.7 1091.2 L-864.4 1091.2 L-867.2 1142.6 L-897.6 1174.2 L-948.1 1157.3 L-957.8 1157.5 L-1022.5 1158.3 L-1063.6 1158.3 L-1065.6 1071.1 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M374.6 274.3 L378.1 291.8 L379.5 298.7 L335.0 330.9 L520.8 335.8 L521.4 294.6 L461.3 287.3 L440.2 263.7 L398.7 270.4 L374.6 274.3 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L300.3 259.5 L291.0 212.1 L329.3 209.4 L333.6 231.1 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M339.7 176.6 L354.1 175.7 L360.7 207.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 L333.6 231.1 L329.3 209.4 L291.0 212.1 L284.8 180.2 L339.7 176.6 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M339.7 176.6 L284.8 180.2 L291.0 212.1 L300.3 259.5 L229.1 242.9 L239.7 175.8 L339.7 176.6 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M300.3 259.5 L307.6 296.6 L345.9 294.0 L338.7 257.0 L300.3 259.5 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M338.7 257.0 L345.9 294.0 L378.1 291.8 L374.6 274.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M300.3 259.5 L307.6 296.6 L345.9 294.0 L378.1 291.8 L379.5 298.7 L335.0 330.9 L315.8 330.5 L239.8 329.2 L237.8 313.6 L229.1 242.9 L300.3 259.5 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M374.6 274.3 L378.1 291.8 L379.5 298.7 L335.0 330.9 L520.8 335.8 L521.4 294.6 L461.3 287.3 L440.2 263.7 L398.7 270.4 L374.6 274.3 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M387.1 248.7 L398.7 270.4 L374.6 274.3 L370.3 253.6 L360.7 207.3 L354.1 175.7 L388.9 173.6 L394.6 205.2 L401.7 244.5 L387.1 248.7 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M428.2 212.1 L440.2 263.7 L398.7 270.4 L387.1 248.7 L401.7 244.5 L394.6 205.2 L388.9 173.6 L354.1 175.7 L339.7 176.6 L354.6 160.8 L356.2 145.4 L436.7 151.0 L421.3 183.0 L428.2 212.1 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L356.9 255.8 L351.7 229.9 L333.6 231.1 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M338.7 257.0 L345.9 294.0 L378.1 291.8 L374.6 274.3 L398.7 270.4 L387.1 248.7 L370.3 253.6 L364.1 255.4 L356.9 255.8 L338.7 257.0 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L345.9 294.0 L307.6 296.6 L300.3 259.5 L291.0 212.1 L329.3 209.4 L333.6 231.1 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M333.6 231.1 L338.7 257.0 L356.9 255.8 L351.7 229.9 L333.6 231.1 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M387.1 248.7 L370.3 253.6 L360.7 207.3 L354.1 175.7 L388.9 173.6 L394.6 205.2 L401.7 244.5 L387.1 248.7 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M339.7 176.6 L354.1 175.7 L360.7 207.3 L370.3 253.6 L364.1 255.4 L356.9 255.8 L351.7 229.9 L333.6 231.1 L329.3 209.4 L291.0 212.1 L284.8 180.2 L339.7 176.6 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <path d="M879.4 921.2 L899.6 920.6 L902.4 958.3 L882.4 958.9 L879.4 921.2 Z" fill="none" stroke="#74bd57" stroke-width="1.7" stroke-opacity=".96" stroke-linejoin="round" />
+      <text x="122.4" y="290.6" font-size="12" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_CTR</text>
+      <text x="122.4" y="304.6" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA ACC WEST</text>
+      <text x="199.7" y="406.5" font-size="12" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_CTR</text>
+      <text x="199.7" y="420.5" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA ACC SOUTHWEST</text>
+      <text x="344.3" y="605.2" font-size="12" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_CTR</text>
+      <text x="344.3" y="619.2" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA ACC SOUTH</text>
+      <text x="366.2" y="122.1" font-size="12" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_CTR</text>
+      <text x="366.2" y="136.1" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA ACC NORTH B</text>
+      <text x="-205.7" y="-75.3" font-size="12" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_CTR</text>
+      <text x="-205.7" y="-61.3" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA ACC NORTH A</text>
+      <text x="452.2" y="290.4" font-size="12" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_CTR</text>
+      <text x="452.2" y="304.4" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA ACC EAST</text>
+      <text x="-977.1" y="1110.9" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZULZ_APP</text>
+      <text x="-977.1" y="1122.9" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZULZ APP</text>
+      <text x="418.4" y="292.2" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="418.4" y="304.2" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBTJ APP</text>
+      <text x="321.1" y="233.4" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="321.1" y="245.4" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP W C</text>
+      <text x="338.6" y="216.0" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="338.6" y="228.0" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP W B</text>
+      <text x="289.2" y="203.5" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="289.2" y="215.5" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP W A</text>
+      <text x="318.6" y="273.4" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="318.6" y="285.4" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP S C</text>
+      <text x="358.4" y="267.4" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="358.4" y="279.4" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP S B</text>
+      <text x="306.3" y="295.3" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="306.3" y="307.3" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP S A</text>
+      <text x="418.4" y="292.2" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="418.4" y="304.2" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP E C</text>
+      <text x="381.8" y="230.3" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="381.8" y="242.3" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP E B</text>
+      <text x="395.0" y="201.8" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="395.0" y="213.8" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA APP E A</text>
+      <text x="342.9" y="241.0" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="342.9" y="253.0" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA AD APP C</text>
+      <text x="365.3" y="265.8" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="365.3" y="277.8" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA AD APP B</text>
+      <text x="322.5" y="248.9" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="322.5" y="260.9" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA AD APP A</text>
+      <text x="342.9" y="241.0" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="342.9" y="253.0" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA AA APP C</text>
+      <text x="380.6" y="219.7" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="380.6" y="231.7" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA AA APP B</text>
+      <text x="339.7" y="213.7" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZBAA_APP</text>
+      <text x="339.7" y="225.7" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZBAA AA APP A</text>
+      <text x="888.7" y="936.1" font-size="10" fill="#eaf7ff" stroke="#06131d" stroke-width="2.4" paint-order="stroke" text-anchor="middle" opacity="1">ZSSS_TWR</text>
+      <text x="888.7" y="948.1" font-size="8" fill="#eaf7ff" stroke="#06131d" stroke-width="2.2" paint-order="stroke" text-anchor="middle" opacity="0.9">ZSSS TWR</text>
+    </svg>
+  </div>
+  <div class="rail">
+    <div class="card">
+      <h2>地图图层</h2>
+      <div class="row"><span>FIR / UIR 边界</span><em>恒显边界线</em></div>
+      <div class="row"><span><b style="color:#fff">显示在线管制</b></span><em>已开启</em></div>
+      <div class="row tiny">VATGlasses 高精度扇区 + SimAware 进近兜底，只画有席位在线的扇区；无管制区域的边界线交给 FIR 边界表达</div>
+    </div>
+    <div class="card">
+      <h2>填充图例（CTR 与 APP 同色）</h2>
+      <div class="row"><span class="sw sector"></span><span>航路席位 CTR / FSS</span><em>#def1d7 · 70%</em></div>
+      <div class="row"><span class="sw sector"></span><span>进近塔台 APP / DEP / TWR</span><em>#def1d7 · 70%</em></div>
+      <div class="row"><span class="sw ref"></span><span>参考图取样色</span><em>#def1d7</em></div>
+      <div class="tiny" style="margin-top:8px">填充 <code>#def1d7</code>（占参考图填充像素 74.7%）、边线 <code>#74bd57</code>，均取自同一张扇区图的逐像素采样。席位归属改由呼号标签区分（ZBAA_CTR / ZBAA_APP）。</div>
+    </div>
+    <div class="card">
+      <h2>在线管制</h2>
+      <div class="tiny">
+        VATGlasses Z 高精度扇区 + SimAware 进近兜底 · 共 427 个扇区，
+        当前 FL300 有管制 24 个（在线席位总计 24 个）
+      </div>
+    </div>
+    <div class="card">
+      <h2>当前点亮的席位</h2>
+      <div class="tiny">ZBAA_APP · ZBAA_CTR · ZSSS_TWR · ZULZ_APP</div>
+    </div>
+  </div>
+</div></body></html>

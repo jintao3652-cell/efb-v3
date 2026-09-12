@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>进离场程序未解析 — 根因与修复</title>
+<style>
+  :root {
+    --bg: #07111f; --panel: #0e1c28; --panel2: #101d27; --line: #24455e;
+    --fg: #dcecf4; --dim: #8fb0c4; --accent: #4fc3f7; --ok: #4ade80; --bad: #ff7b72; --warn: #f0c674;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 40px 60px; background: var(--bg); color: var(--fg);
+    font: 15px/1.75 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 25px; margin: 0 0 6px; letter-spacing: .3px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 28px; }
+  h2 { font-size: 17px; margin: 36px 0 12px; padding-left: 11px; border-left: 3px solid var(--accent); }
+  p { margin: 10px 0; color: #c8dbe6; }
+  code, pre { font-family: Consolas, "Cascadia Mono", monospace; }
+  code { background: #16283a; border: 1px solid #23394d; border-radius: 4px; padding: 1px 6px; font-size: 13px; color: #a8d8f0; }
+  pre { background: #0a1723; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.65; color: #cfe3ed; }
+  pre .c { color: #5f7d92; } pre .g { color: var(--ok); } pre .r { color: var(--bad); } pre .y { color: var(--warn); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 14px 0; }
+  .chain { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .chain li { position: relative; padding: 9px 0 9px 42px; border-bottom: 1px dashed #1e3549; font-size: 14px; color: #c8dbe6; }
+  .chain li:last-child { border-bottom: none; }
+  .chain li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 10px;
+    width: 24px; height: 24px; border-radius: 50%; background: #17334a; color: var(--accent);
+    font: 700 12px/24px Consolas, monospace; text-align: center; }
+  .chain li.hot::before { background: #4a1f22; color: var(--bad); }
+  .chain li.hot { color: #ffd9d6; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid #1e3549; }
+  th { background: #12293c; color: #a8d8f0; font-weight: 700; font-size: 12.5px; letter-spacing: .4px; }
+  td.mono { font-family: Consolas, monospace; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .route { font-family: Consolas, monospace; font-size: 14px; letter-spacing: .5px; }
+  .route b { color: var(--ok); background: #14402a; padding: 1px 6px; border-radius: 4px; }
+  .route i { color: var(--dim); font-style: normal; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; color: #a8d8f0; letter-spacing: .4px; }
+  .card ul { margin: 0; padding-left: 18px; font-size: 13px; color: #c8dbe6; }
+  .card li { margin: 4px 0; }
+  .foot { margin-top: 40px; padding-top: 16px; border-top: 1px solid #1e3549; color: #6d8ba0; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>为什么 <code>CIND8S</code> / <code>ROKI1B</code> 没有被识别成进离场程序</h1>
+<div class="sub">EFB V3 · 2026-09-11 · 计划 DLH106 EDDF → EDDM · 结论：代码里从来没有「把航路文本解析成程序」这一步</div>
+
+<h2>一、你的这条计划实际存成了什么</h2>
+<pre><span class="c">-- %APPDATA%\SkyBoard EFB\skyboard.db</span>
+callsign : DLH106 | EDDF -&gt; EDDM
+route    : CIND8S CINDY Z74 HAREM T104 ROKIL ROKI1B
+RWY      : dep=<span class="r">None</span> arr=<span class="r">None</span>
+sid      : <span class="r">(NULL)</span>
+star     : <span class="r">(NULL)</span>
+approach : <span class="r">(NULL)</span></pre>
+<p><code>sid</code> / <code>star</code> 三个字段全是空的 —— 不是匹配失败，是<b>根本没被写入过</b>。</p>
+
+<h2>二、根因链</h2>
+<div class="panel">
+<ol class="chain">
+  <li>计划里 <code>route</code> 是<b>纯文本字段</b>，<code>sid</code> / <code>star</code> 是<b>另外的独立字段</b>，两者之间没有任何桥</li>
+  <li class="hot"><code>CIND8S</code> / <code>ROKI1B</code> 是<b>程序标识符，不是航路点</b> —— SimBrief 的 navlog 里这两个 fix 压根不存在，
+      所以连 <code>route_points</code> 里都不会出现它们</li>
+  <li>全项目搜下来，<code>plan.route</code> 只被用在两处：<b>列表里显示</b>、<b>编辑框里编辑</b>。
+      没有任何一处把它切开去反查程序表</li>
+  <li>SimBrief 导入那条链路里，构造 <code>FlightPlan</code> 时<b>没有带 <code>sid</code> / <code>star</code></b>，
+      即使 SimBrief 侧知道，也会在这一步丢掉</li>
+  <li>后端 <code>save_flight_plan</code> 只是原样落库，同样不做解析</li>
+  <li class="hot">结论：<code>sid</code> / <code>star</code> <b>只可能来自编辑器的下拉手动选择</b>；
+      自动识别这个功能<b>从来没有被实现过</b></li>
+</ol>
+</div>
+
+<h2>三、不是数据的问题（已核实）</h2>
+<p>从你本机的 Fenix 导航库 <code>C:\ProgramData\Fenix\Navdata\nd.db3</code> 直接查：</p>
+<table>
+  <thead><tr><th>机场</th><th>程序</th><th>ID</th><th>类型</th><th>跑道</th></tr></thead>
+  <tbody>
+    <tr><td>EDDF</td><td class="mono ok">CIND8S</td><td class="mono">1161</td><td>SID (Proc=2)</td><td class="mono">18</td></tr>
+    <tr><td>EDDM</td><td class="mono ok">ROKI1B</td><td class="mono">36843</td><td>STAR (Proc=1)</td><td class="mono">26L / 26R</td></tr>
+  </tbody>
+</table>
+<p>两条程序都在，名字和航路文本里的 token <b>一模一样</b>。EDDF 共 66 条 SID / 41 条 STAR，EDDM 共 76 条 SID / 16 条 STAR。</p>
+<p>再看你这条计划实际存下来的航路点（13 个）：</p>
+<pre>EDDF → CINDY → HAREM → ELMOX → PIGAB → DKB → … → ANORA → XERUM → BURAM → WLD → ROKIL → EDDM
+
+航路文本 token : <span class="route">[CIND8S, CINDY, Z74, HAREM, T104, ROKIL, ROKI1B]</span>
+其中出现在航路点里 : <span class="g">[CINDY, HAREM, ROKIL]</span>          <span class="c">← 真正的航路点</span>
+未出现在航路点里   : <span class="r">[CIND8S, Z74, T104, ROKI1B]</span>     <span class="c">← 程序名与航路名，本来就不是 fix</span></pre>
+
+<h2>四、修复</h2>
+<p>新增纯函数模块 <code>src/lib/route-procedures.ts</code>，按飞行计划格式的通用约定识别：</p>
+<pre><span class="c">// SimBrief 等主流格式的约定：首个元素是离场程序名，末个元素是进场程序名</span>
+<span class="y">CIND8S</span> CINDY Z74 HAREM T104 ROKIL <span class="y">ROKI1B</span>
+   ↓                                    ↓
+ EDDF 的 SID 表                        EDDM 的 STAR 表
+   ↓ 按名称精确匹配                       ↓ 按名称精确匹配
+ CIND8S (ID 1161)                     ROKI1B (ID 36843)</pre>
+<p>然后在飞行计划编辑器里接上自动补全：</p>
+<ul style="color:#c8dbe6;font-size:14px">
+  <li>程序表读回来之后，按航路文本补一次 <code>sid</code> / <code>star</code></li>
+  <li><b>只在对应字段为空时补</b>，绝不覆盖手动选择</li>
+  <li>按 <code>(计划 id, 航路文本)</code> 只补一次（<code>useRef</code> 守卫），不会反复触发</li>
+  <li>不匹配就什么都不做 —— 比如首 token 是雷达引导后的第一个航路点时不猜</li>
+  <li>选中时同时定跑道（<code>procedureSelection</code>），并把程序航迹点交给已有的取点流程</li>
+</ul>
+<p>顺带把手动选择与自动识别统一到同一个 <code>procedureSelection()</code>，避免两处逻辑各自漂移。</p>
+
+<h2>五、验证（真实导航库 + 真实计划，非推理）</h2>
+<div class="grid2">
+  <div class="card">
+    <h3>匹配用例 8/8 通过</h3>
+    <ul>
+      <li><span class="ok">✓</span> 你的实际航路 → <b>CIND8S</b> + <b>ROKI1B</b></li>
+      <li><span class="ok">✓</span> 全小写 + 多余空格 → 同样结果</li>
+      <li><span class="ok">✓</span> 去掉 SID token（首 token 变 CINDY）→ <b>不误匹配</b></li>
+      <li><span class="ok">✓</span> 去掉 STAR token（末 token 变 ROKIL）→ <b>不误匹配</b></li>
+      <li><span class="ok">✓</span> 程序表换成交错机场 → 不匹配</li>
+      <li><span class="ok">✓</span> 单 token / 空航路 → 安全返回</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>误判压力测试</h3>
+    <ul>
+      <li>199 个程序名中，与航路点标识<b>重名 0 个</b></li>
+      <li>拿 15 个真实航路点 / 航路名当 token 去匹配<br>（CINDY、HAREM、ROKIL、T104、Z74…）<br>→ <b>误判 0 次</b></li>
+      <li><code>tsc -b</code> 0 error、<code>vite build</code> 成功</li>
+    </ul>
+  </div>
+</div>
+
+<h3 style="font-size:14px;color:#a8d8f0;margin:20px 0 8px">航迹连续性 —— 识别出来的程序能不能接上航路</h3>
+<pre>EDDF <span class="g">CIND8S</span>（跑道 18）: 7 个点  DF158 → DF171 → DF173 → DF174 → DF170 → AMTIX → <b>CINDY</b>
+EDDM <span class="g">ROKI1B</span>（跑道 26L）: 2 个点 <b>ROKIL</b> → MIQ
+
+SID 末点 = <span class="g">CINDY</span> ，正是航路文本里第一个航路点
+STAR 首点 = <span class="g">ROKIL</span> ，正是航路文本里最后一个航路点
+<span class="c">→ 三段接得上，不是各画各的</span></pre>
+
+<h2>六、副产品发现：跑道不指定时反而取不到 STAR 的点</h2>
+<p>ROKI1B 在 nd.db3 里的 leg 是<b>按跑道过渡重复编码</b>的（<code>RW26L</code> 两条、<code>RW26R</code> 两条），
+而后端取点时会用跑道过滤：</p>
+<pre>ROKI1B + 跑道 '26L' → 2 点      ROKI1B + 跑道 '08L' → <span class="r">0 点</span>
+ROKI1B + 跑道 '26R' → 2 点      ROKI1B + 跑道 '08R' → <span class="r">0 点</span>
+                                ROKI1B + <span class="r">不指定</span>   → <span class="r">0 点</span></pre>
+<p>跑道为空时，<code>normalize_runway("")</code> 与 <code>RW26L</code> 对不上，leg 会被整批过滤掉。
+所以自动识别顺带定跑道这一步不是锦上添花，而是<b>拿到 STAR 航迹的必要条件</b>。</p>
+
+<div class="foot">
+  改动：<code>src/lib/route-procedures.ts</code>（新增）、<code>src/pages/FlightPlansPage.tsx</code>（自动补全 + 逻辑收敛）<br>
+  验证环境：Fenix nd.db3（真实 AIRAC 数据）· 真实计划 DLH106 EDDF→EDDM · tsc 5.7 / vite 6.4<br>
+  ⚠️ 逻辑与数据层已验证；界面表现未在运行中的应用里点过 —— 打开该计划的编辑器即可看到 SID/STAR 被自动填上
+</div>
+
+</body>
+</html>

@@ -160,6 +160,10 @@ fn simbrief_route_points(payload: &Value) -> Vec<FlightRoutePoint> {
             ident,
             latitude,
             longitude,
+            leg_type: None,
+            arc_center: None,
+            course: None,
+            course_only: false,
         });
     }
     points
@@ -186,6 +190,10 @@ fn simbrief_airport_point(payload: &Value, section: &str, ident: &str) -> Option
         name: value_text(airport.get("name")),
         latitude,
         longitude,
+        leg_type: None,
+        arc_center: None,
+        course: None,
+        course_only: false,
     })
 }
 
