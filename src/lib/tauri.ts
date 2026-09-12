@@ -107,6 +107,11 @@ export interface ChartFoxChart {
   url: string;
 }
 
+export interface ChartFoxAsset {
+  path: string;
+  mediaType: "application/pdf" | "image";
+}
+
 export interface LocalChartLibraryStatus {
   ready: boolean;
   path?: string;
@@ -220,6 +225,11 @@ export async function importSimBriefFlight(username: string): Promise<SimBriefFl
 export async function listChartFoxCharts(icao: string): Promise<ChartFoxChart[]> {
   if (!isTauri()) throw new Error("ChartFox 查询仅在桌面应用中可用");
   return invoke<ChartFoxChart[]>("list_chartfox_charts", { icao });
+}
+
+export async function openChartFoxChart(icao: string, chartId: string): Promise<ChartFoxAsset> {
+  if (!isTauri()) throw new Error("ChartFox 航图缓存仅在桌面应用中可用");
+  return invoke<ChartFoxAsset>("open_chartfox_chart", { icao, chartId });
 }
 
 export async function getLocalChartLibraryStatus(): Promise<LocalChartLibraryStatus> {

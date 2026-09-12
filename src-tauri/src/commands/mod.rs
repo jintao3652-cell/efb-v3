@@ -17,7 +17,7 @@ pub use chart::{
     cache_chart_pdf, clear_chart_cache, get_local_chart_library_status, list_local_charts,
     open_local_chart, set_local_chart_library,
 };
-pub use chartfox::list_chartfox_charts;
+pub use chartfox::{list_chartfox_charts, open_chartfox_chart};
 pub use flightplan::{list_flight_plans, save_flight_plan};
 pub use navigation::{
     get_navigation_airport_details, get_navigation_airport_procedures,

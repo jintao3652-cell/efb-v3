@@ -7,7 +7,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Archive, ArrowLeft, BookOpen, Building2, ChevronLeft, ChevronRight, Download, ExternalLink, FilePlus2, FileText, FolderOpen, Minus, PenLine, Plus, RefreshCw, RotateCw, Search, Trash2 } from "lucide-react";
-import { cacheChartPdf, getLocalChartLibraryStatus, getXflyChartImage, isTauri, listChartFoxCharts, listLocalCharts, listNavigraphCharts, openLocalChart, setLocalChartLibrary, type NavigraphChart } from "../lib/tauri";
+import { cacheChartPdf, getLocalChartLibraryStatus, getXflyChartImage, isTauri, listChartFoxCharts, listLocalCharts, listNavigraphCharts, openChartFoxChart, openLocalChart, setLocalChartLibrary, type NavigraphChart } from "../lib/tauri";
 import type { Chart } from "../types";
 import { StatusBadge } from "../components/common/StatusBadge";
 
@@ -69,6 +69,7 @@ export function ChartsPage() {
   const [pdfSource, setPdfSource] = useState<PdfSource | null>(null);
   const [imageSource, setImageSource] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [fileName, setFileName] = useState("");
   const [pageCount, setPageCount] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
@@ -103,6 +104,7 @@ export function ChartsPage() {
     setPdfSource(null);
     setImageSource("");
     setImageLoading(false);
+    setImageSize({ width: 0, height: 0 });
     setFileName("");
     setError("");
     resetPdfTools();
@@ -202,7 +204,7 @@ export function ChartsPage() {
   }, [pageNumber]);
 
   useEffect(() => {
-    if (!pdfSource || !viewerRef.current) return;
+    if ((!pdfSource && !imageSource) || !viewerRef.current) return;
     const viewer = viewerRef.current;
     const updateWidth = () => {
       const styles = window.getComputedStyle(viewer);
@@ -217,11 +219,11 @@ export function ChartsPage() {
       observer.disconnect();
       window.removeEventListener("resize", updateWidth);
     };
-  }, [pdfSource]);
+  }, [imageSource, pdfSource]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
-    if (!pdfSource || !stage) return;
+    if ((!pdfSource && !imageSource) || !stage) return;
     const observer = new ResizeObserver(redrawInk);
     observer.observe(stage);
     const frame = window.requestAnimationFrame(redrawInk);
@@ -229,11 +231,11 @@ export function ChartsPage() {
       observer.disconnect();
       window.cancelAnimationFrame(frame);
     };
-  }, [pdfSource, pageNumber, rotation, viewerWidth, zoom, redrawInk]);
+  }, [imageSource, pdfSource, pageNumber, rotation, viewerWidth, zoom, redrawInk]);
 
   useEffect(() => {
     setHasInk((inkByPageRef.current.get(pageNumber)?.length ?? 0) > 0);
-  }, [pageNumber, pdfSource]);
+  }, [imageSource, pageNumber, pdfSource]);
 
   const pointForEvent = (event: ReactPointerEvent<HTMLCanvasElement>): InkPoint => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -265,7 +267,7 @@ export function ChartsPage() {
     setHasInk(false);
     redrawInk();
   };
-  const rotatePdf = () => {
+  const rotatePreview = () => {
     for (const [inkPage, strokes] of inkByPageRef.current.entries()) {
       inkByPageRef.current.set(inkPage, strokes.map((stroke) => ({ ...stroke, points: stroke.points.map((point) => ({ x: 1 - point.y, y: point.x })) })));
     }
@@ -296,10 +298,32 @@ export function ChartsPage() {
     setSelected(chart);
     setExternalChartUrl("");
   };
-  const chooseChartFox = (chart: { id: string; title: string; chartType: string; url: string }) => {
+  const chooseChartFox = async (chart: { id: string; title: string; chartType: string; url: string }) => {
     resetPreview();
+    const requestId = ++imageRequestRef.current;
     setSelected({ id: `chartfox-${chart.id}`, airport: chartFoxIcao, category: categoryForChartFox(chart.chartType), title: chart.title, revision: "ChartFox", cached: false });
     setExternalChartUrl(chart.url);
+    setFileName(chart.title);
+    if (!chart.url) {
+      setError("ChartFox 未提供可打开的航图链接");
+      return;
+    }
+    if (!isTauri()) return;
+    setImageLoading(true);
+    try {
+      const asset = await openChartFoxChart(chartFoxIcao, chart.id);
+      if (imageRequestRef.current !== requestId) return;
+      if (asset.mediaType === "application/pdf") {
+        setPdfSource(convertFileSrc(asset.path));
+        setFileName(/\.pdf$/i.test(chart.title) ? chart.title : `${chart.title}.pdf`);
+      } else {
+        setImageSource(convertFileSrc(asset.path));
+      }
+    } catch (reason) {
+      if (imageRequestRef.current === requestId) setError(reason instanceof Error ? reason.message : "无法打开 ChartFox 航图");
+    } finally {
+      if (imageRequestRef.current === requestId) setImageLoading(false);
+    }
   };
   const chooseNavigraphChart = async (chart: NavigraphChart) => {
     resetPreview();
@@ -324,6 +348,7 @@ export function ChartsPage() {
     imageRequestRef.current += 1;
     setImageSource("");
     setImageLoading(false);
+    setImageSize({ width: 0, height: 0 });
     setPdfSource(file);
     setFileName(file.name);
     setError("");
@@ -356,6 +381,10 @@ export function ChartsPage() {
     if (!sourcePath || Array.isArray(sourcePath)) return;
     try {
       const cachedPath = await cacheChartPdf(sourcePath, selected?.id ?? `manual-${crypto.randomUUID()}`);
+      imageRequestRef.current += 1;
+      setImageSource("");
+      setImageLoading(false);
+      setImageSize({ width: 0, height: 0 });
       setPdfSource(convertFileSrc(cachedPath));
       setFileName(sourcePath.split(/[\\/]/).pop() ?? "航图.pdf");
       setError("");
@@ -366,6 +395,13 @@ export function ChartsPage() {
   };
 
   const pageWidth = Math.max(280, Math.round(viewerWidth * zoom));
+  const imageBaseWidth = Math.max(280, Math.min(imageSize.width || viewerWidth, viewerWidth));
+  const imageWidth = Math.round(imageBaseWidth * zoom);
+  const imageHeight = Math.round(imageWidth * (imageSize.height && imageSize.width ? imageSize.height / imageSize.width : 1.414));
+  const imageQuarterTurn = rotation % 180 !== 0;
+  const rotatedImageWidth = imageQuarterTurn ? imageHeight : imageWidth;
+  const rotatedImageHeight = imageQuarterTurn ? imageWidth : imageHeight;
+  const imageTransform = rotation === 90 ? `translate(${imageHeight}px, 0) rotate(90deg)` : rotation === 180 ? `translate(${imageWidth}px, ${imageHeight}px) rotate(180deg)` : rotation === 270 ? `translate(0, ${imageWidth}px) rotate(270deg)` : "none";
 
   return <div className="chart-page split-page">
     <section className="panel chart-sidebar">
@@ -391,7 +427,7 @@ export function ChartsPage() {
         <div className="airport-chart-filters navigraph-chart-filters">{(["STAR", "APP", "TAXI", "SID", "REF"] as const).map((item) => <button key={item} data-category={item} className={navigraphCategory === item ? "active" : ""} onClick={() => setNavigraphCategory(item)}>{item}</button>)}</div>
         <div className="chart-list">{navigraph.isFetching && <p className="chartfox-state">正在查询 NAVIGRAPH…</p>}{navigraph.isError && <p className="chartfox-state error">{navigraph.error.message}</p>}{navigraph.data?.length === 0 && <p className="chartfox-state">此机场暂无可用航图。</p>}{navigraph.data && navigraph.data.length > 0 && visibleNavigraphCharts.length === 0 && <p className="chartfox-state">此机场暂无 {navigraphCategory} 类航图。</p>}{visibleNavigraphCharts.map((chart) => <button key={chart.id} onClick={() => chooseNavigraphChart(chart)} className={selected?.id === `navigraph-${chart.id}` ? "selected" : ""}><FileText size={18} /><span><strong>{chart.indexNumber} · {chart.name}</strong><small>{categoryForNavigraph(chart)} · 修订 {navigraphRevision(chart.revisionDate)}</small></span><Download size={15} className="cached-icon" /></button>)}</div>
       </> : <>
-        <div className="chartfox-search"><label>ICAO 机场代码<input value={chartFoxIcao} maxLength={4} onChange={(event) => setChartFoxIcao(event.target.value.toUpperCase())} /></label><button className="icon-button" onClick={() => chartFox.refetch()} disabled={chartFox.isFetching} aria-label="刷新 ChartFox"><RefreshCw className={chartFox.isFetching ? "spinning" : ""} size={17} /></button></div><p className="source-description">ChartFox 提供的航图索引。可用性、内容与许可由 ChartFox 决定。</p><div className="chart-list">{chartFox.isFetching && <p className="chartfox-state">正在查询 ChartFox…</p>}{chartFox.isError && <p className="chartfox-state error">{chartFox.error.message}</p>}{chartFox.data?.length === 0 && <p className="chartfox-state">此机场暂无可用航图。</p>}{chartFox.data?.map((chart) => <button key={chart.id} onClick={() => chooseChartFox(chart)} className={selected?.id === `chartfox-${chart.id}` ? "selected" : ""}><FileText size={18} /><span><strong>{chart.title}</strong><small>{chart.chartType || "CHARTFOX"} · {chartFoxIcao}</small></span><ExternalLink size={15} className="cached-icon" /></button>)}</div>
+        <div className="chartfox-search"><label>ICAO 机场代码<input value={chartFoxIcao} maxLength={4} onChange={(event) => { setChartFoxIcao(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setSelected(null); setExternalChartUrl(""); resetPreview(); }} /></label><button className="icon-button" onClick={() => chartFox.refetch()} disabled={chartFox.isFetching || chartFoxIcao.length !== 4} aria-label="刷新 ChartFox"><RefreshCw className={chartFox.isFetching ? "spinning" : ""} size={17} /></button></div><p className="source-description">ChartFox 提供的航图索引。PDF 或图片链接会在应用内打开并启用完整预览工具，网页链接仍使用外部查看。</p><div className="chart-list">{chartFox.isFetching && <p className="chartfox-state">正在查询 ChartFox…</p>}{chartFox.isError && <p className="chartfox-state error">{chartFox.error.message}</p>}{chartFox.data?.length === 0 && <p className="chartfox-state">此机场暂无可用航图。</p>}{chartFox.data?.map((chart) => <button key={chart.id} onClick={() => chooseChartFox(chart)} className={selected?.id === `chartfox-${chart.id}` ? "selected" : ""}><FileText size={18} /><span><strong>{chart.title}</strong><small>{chart.chartType || "CHARTFOX"} · {chartFoxIcao}</small></span><ExternalLink size={15} className="cached-icon" /></button>)}</div>
       </>}
     </section>
     <section className="chart-viewer">
@@ -400,11 +436,17 @@ export function ChartsPage() {
       {pdfSource ? <>
         <div className="pdf-toolbar">
           <div className="pdf-toolbar-group"><button onClick={() => changeZoom(-0.1)} disabled={zoom <= 0.5} aria-label="缩小航图" title="缩小"><Minus size={17} /></button><button className="pdf-zoom-value" onClick={() => setZoom(1)} title="恢复适应宽度">{Math.round(zoom * 100)}%</button><button onClick={() => changeZoom(0.1)} disabled={zoom >= 3} aria-label="放大航图" title="放大"><Plus size={17} /></button></div>
-          <div className="pdf-toolbar-group"><button onClick={rotatePdf} title="顺时针旋转"><RotateCw size={17} /><span>旋转</span></button><button className={drawMode ? "active" : ""} onClick={() => setDrawMode((current) => !current)} aria-pressed={drawMode} title="画笔标注"><PenLine size={17} /><span>画笔</span></button><button onClick={clearInk} disabled={!hasInk} title="清除当前页标注"><Trash2 size={17} /><span>清除</span></button></div>
+          <div className="pdf-toolbar-group"><button onClick={rotatePreview} title="顺时针旋转"><RotateCw size={17} /><span>旋转</span></button><button className={drawMode ? "active" : ""} onClick={() => setDrawMode((current) => !current)} aria-pressed={drawMode} title="画笔标注"><PenLine size={17} /><span>画笔</span></button><button onClick={clearInk} disabled={!hasInk} title="清除当前页标注"><Trash2 size={17} /><span>清除</span></button></div>
           <div className="pdf-toolbar-group pdf-page-controls"><button disabled={pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)} aria-label="上一页"><ChevronLeft size={17} /></button><span>{pageNumber} / {pageCount || "–"}</span><button disabled={pageCount === 0 || pageNumber >= pageCount} onClick={() => setPageNumber((page) => page + 1)} aria-label="下一页"><ChevronRight size={17} /></button></div>
         </div>
         <div className="pdf-viewer" ref={viewerRef}><Document file={pdfSource} onLoadSuccess={({ numPages }: { numPages: number }) => { setPageCount(numPages); setPageNumber(1); }} onLoadError={(reason) => setError(`无法读取 PDF：${reason instanceof Error ? reason.message : "文件加载失败"}`)} loading={<div className="pdf-loading">正在渲染航图…</div>}><div className="pdf-page-stage" ref={pageStageRef}><Page pageNumber={pageNumber} width={pageWidth} rotate={rotation} renderTextLayer renderAnnotationLayer /><canvas ref={inkCanvasRef} className={`pdf-ink-canvas ${drawMode ? "active" : ""}`} onPointerDown={startInk} onPointerMove={continueInk} onPointerUp={finishInk} onPointerCancel={finishInk} /></div></Document></div>
-      </> : imageSource ? <div className="chart-image-viewer"><img src={imageSource} alt={selected?.title ?? "NAVIGRAPH 航图"} onError={() => { setImageSource(""); setError("航图图片加载失败"); }} /></div> : <div className="chart-placeholder"><BookOpen size={42} /><strong>{imageLoading ? "正在下载航图…" : selected ? source === "chartfox" ? "在线航图索引" : "尚未打开航图" : "没有正在预览的航图"}</strong><p>{imageLoading ? "正在获取完整航图图片，请稍候。" : selected ? source === "chartfox" ? "请使用下方按钮在 ChartFox 查看，或导入一份合法授权的 PDF。" : "点击本地或 NAVIGRAPH 航图可直接打开，也可导入 PDF。" : "先选择本地航图库或在线航图来源中的机场与航图。"}</p></div>}
+      </> : imageSource ? <>
+        <div className="pdf-toolbar">
+          <div className="pdf-toolbar-group"><button onClick={() => changeZoom(-0.1)} disabled={zoom <= 0.5} aria-label="缩小航图" title="缩小"><Minus size={17} /></button><button className="pdf-zoom-value" onClick={() => setZoom(1)} title="恢复适应宽度">{Math.round(zoom * 100)}%</button><button onClick={() => changeZoom(0.1)} disabled={zoom >= 3} aria-label="放大航图" title="放大"><Plus size={17} /></button></div>
+          <div className="pdf-toolbar-group"><button onClick={rotatePreview} title="顺时针旋转"><RotateCw size={17} /><span>旋转</span></button><button className={drawMode ? "active" : ""} onClick={() => setDrawMode((current) => !current)} aria-pressed={drawMode} title="画笔标注"><PenLine size={17} /><span>画笔</span></button><button onClick={clearInk} disabled={!hasInk} title="清除标注"><Trash2 size={17} /><span>清除</span></button></div>
+        </div>
+        <div className="chart-image-viewer" ref={viewerRef}><div className="chart-image-stage" ref={pageStageRef} style={{ width: rotatedImageWidth, height: rotatedImageHeight }}><img src={imageSource} alt={selected?.title ?? "在线航图"} style={{ width: imageWidth, transform: imageTransform }} onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => { setImageSource(""); setError("航图图片加载失败"); }} /><canvas ref={inkCanvasRef} className={`pdf-ink-canvas ${drawMode ? "active" : ""}`} onPointerDown={startInk} onPointerMove={continueInk} onPointerUp={finishInk} onPointerCancel={finishInk} /></div></div>
+      </> : <div className="chart-placeholder"><BookOpen size={42} /><strong>{imageLoading ? "正在下载航图…" : selected ? source === "chartfox" ? "在线航图索引" : "尚未打开航图" : "没有正在预览的航图"}</strong><p>{imageLoading ? "正在获取航图文件，请稍候。" : selected ? source === "chartfox" ? "此链接无法在应用内读取时，可使用下方按钮在 ChartFox 查看。" : "点击本地或 NAVIGRAPH 航图可直接打开，也可导入 PDF。" : "先选择本地航图库或在线航图来源中的机场与航图。"}</p></div>}
       <div className="chart-controls"><button className="button secondary" onClick={importPdf}><FilePlus2 size={17} />导入单份 PDF</button>{externalChartUrl && <a className="button secondary" href={externalChartUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />{source === "chartfox" ? "在 ChartFox 查看" : "打开原始航图"}</a>}{!isTauri() && <span className="chart-cache-note"><BookOpen size={15} />浏览器模式仅临时预览</span>}</div>
       {error && <p className="form-error">{error}</p>}
       <div className="chart-meta"><span>来源：{source === "navigraph" ? "NAVIGRAPH" : source === "chartfox" ? "ChartFox" : localLibrary.data?.sourceType === "zip" ? "本地 ZIP" : "本地文件夹"}</span><span>格式：{imageSource || source === "navigraph" ? "图片" : "PDF"}</span><span>请遵守数据源的使用条款</span></div>

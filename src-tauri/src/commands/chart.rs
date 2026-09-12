@@ -615,6 +615,7 @@ pub fn clear_chart_cache(app: AppHandle) -> Result<(), String> {
         "chart-cache",
         "chart-thumbnails",
         "chart-images",
+        "chartfox-chart-cache",
         "navigraph-chart-cache",
         "weather-cache",
         "notam-cache",

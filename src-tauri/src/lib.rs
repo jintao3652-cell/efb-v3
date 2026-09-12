@@ -6,8 +6,8 @@ use commands::{
     get_navigation_database_status, get_navigation_map_data, get_navigation_procedure_points,
     get_navigation_runway_threshold, get_notams, get_weather, get_xfly_airport_data,
     get_xfly_chart_image, get_xfly_chart_thumbnail, import_simbrief_flight, list_chartfox_charts,
-    list_flight_plans, list_local_charts, list_navigraph_charts, open_local_chart,
-    save_flight_plan, search_navigation_airports, set_local_chart_library,
+    list_flight_plans, list_local_charts, list_navigraph_charts, open_chartfox_chart,
+    open_local_chart, save_flight_plan, search_navigation_airports, set_local_chart_library,
     set_navigation_database,
 };
 
@@ -25,6 +25,7 @@ pub fn run() {
             get_current_airac_cycle,
             import_simbrief_flight,
             list_chartfox_charts,
+            open_chartfox_chart,
             get_navigation_database_status,
             set_navigation_database,
             search_navigation_airports,
