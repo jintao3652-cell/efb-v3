@@ -1,4 +1,5 @@
 import { fetchJsonWithRetry, loadCachedResource, waitFor, type CachedResourceMeta } from "./network-cache";
+import { getOsmAirportGround, isTauri } from "./tauri";
 
 export interface AirportGroundFeatureCollection {
   type: "FeatureCollection";
@@ -31,12 +32,14 @@ export interface AirportGroundBounds {
 }
 
 const endpoints = [
-  "https://overpass.openstreetmap.fr/api/interpreter",
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
 ];
 const requestGrid = 0.05;
-const maximumHalfSpan = 0.15;
+// Keep each Overpass request airport-sized. A 0.3° square often times out on busy
+// public instances even though the actual airport occupies only a small part of it.
+const maximumHalfSpan = 0.08;
 const overpassMinimumInterval = 1_500;
 let lastOverpassRequestAt = 0;
 let overpassQueue: Promise<void> = Promise.resolve();
@@ -152,12 +155,16 @@ export async function loadOsmAirportGround(bounds: AirportGroundBounds, signal?:
   const normalizedBounds = normalizeAirportGroundBounds(bounds);
   const bbox = `${normalizedBounds.south},${normalizedBounds.west},${normalizedBounds.north},${normalizedBounds.east}`;
   const query = `[out:json][timeout:18];(way["aeroway"="runway"](${bbox});way["aeroway"="taxiway"](${bbox});way["aeroway"="taxilane"](${bbox});way["aeroway"="apron"](${bbox});way["aeroway"="terminal"](${bbox});way["building"="terminal"](${bbox});node["aeroway"="parking_position"](${bbox});node["aeroway"="gate"](${bbox}););out tags geom;`;
-  const cacheKey = `osm-airport-ground-v4:${bbox}`;
+  const cacheKey = `osm-airport-ground-v6:${bbox}`;
   const result = await loadCachedResource({
     cacheKey,
     ttlMs: 24 * 60 * 60_000,
     signal,
     load: (requestSignal) => scheduleOverpassRequest(requestSignal, async () => {
+      if (isTauri()) {
+        const payload = await getOsmAirportGround(normalizedBounds);
+        return { type: "FeatureCollection" as const, features: (payload.elements ?? []).flatMap((element) => asFeature(element)) };
+      }
       let lastError = new Error("OSM 机场地面数据加载失败");
       for (const endpoint of endpoints) {
         try {

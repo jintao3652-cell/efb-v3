@@ -100,6 +100,17 @@ export interface MapViewport {
   zoom: number;
 }
 
+export interface OsmAirportGroundResponse {
+  elements?: Array<{
+    type: "node" | "way";
+    id: number;
+    lat?: number;
+    lon?: number;
+    tags?: Record<string, string>;
+    geometry?: Array<{ lat: number; lon: number }>;
+  }>;
+}
+
 export interface ChartFoxChart {
   id: string;
   title: string;
@@ -290,6 +301,11 @@ export async function getNavigationRunwayThreshold(icao: string, runway: string)
 export async function getNavigationMapData(viewport: MapViewport): Promise<NavigationMapData> {
   if (!isTauri()) return { airports: [], navaids: [], airways: [] };
   return invoke<NavigationMapData>("get_navigation_map_data", { west: viewport.west, south: viewport.south, east: viewport.east, north: viewport.north, zoom: viewport.zoom });
+}
+
+export async function getOsmAirportGround(bounds: { west: number; south: number; east: number; north: number }): Promise<OsmAirportGroundResponse> {
+  if (!isTauri()) throw new Error("OSM 桌面代理仅在桌面应用中可用");
+  return invoke<OsmAirportGroundResponse>("get_osm_airport_ground", bounds);
 }
 
 export async function getXflyAirportData(icao: string, preferCache = false): Promise<XflyAirportData> {

@@ -5,6 +5,7 @@ mod chartfox;
 mod flightplan;
 mod navigation;
 mod notam;
+mod osm;
 mod simbrief;
 mod weather;
 
@@ -25,5 +26,6 @@ pub use navigation::{
     get_navigation_runway_threshold, search_navigation_airports, set_navigation_database,
 };
 pub use notam::get_notams;
+pub use osm::get_osm_airport_ground;
 pub use simbrief::import_simbrief_flight;
 pub use weather::get_weather;
