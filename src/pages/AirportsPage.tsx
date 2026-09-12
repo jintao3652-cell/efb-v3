@@ -12,23 +12,23 @@ type AirportTab = "overview" | "ground" | "charts";
 type XflyRunway = XflyAirportData["runways"][number];
 type XflyChart = XflyAirportData["charts"][number];
 type AirportChartCategory = "STAR" | "APP" | "TAXI" | "SID" | "REF";
-type AirportChartFilter = "全部" | AirportChartCategory;
 
 const airportChartCategories: Array<{ id: AirportChartCategory; label: string; description: string }> = [
-  { id: "STAR", label: "进场 STAR", description: "标准仪表进场程序" },
-  { id: "APP", label: "进近 APP", description: "仪表与目视进近程序" },
-  { id: "TAXI", label: "机场 / 滑行", description: "机场图、停机位与滑行资料" },
-  { id: "SID", label: "离场 SID", description: "标准仪表离场程序" },
-  { id: "REF", label: "参考 REF", description: "机场简报、运行限制与参考资料" },
+  { id: "STAR", label: "STAR", description: "标准仪表进场程序" },
+  { id: "APP", label: "APP", description: "仪表与目视进近程序" },
+  { id: "TAXI", label: "TAXI", description: "机场图、停机位与滑行资料" },
+  { id: "SID", label: "SID", description: "标准仪表离场程序" },
+  { id: "REF", label: "REF", description: "机场简报、运行限制与参考资料" },
 ];
 
 function categoryForAirportChart(chart: XflyChart): AirportChartCategory {
   const sourceCategory = chart.category.trim().toUpperCase();
   const title = chart.name.toUpperCase();
 
-  if (sourceCategory === "ARR") return "STAR";
+  if (sourceCategory === "ARR" || sourceCategory === "STAR") return "STAR";
   if (sourceCategory === "APP") return "APP";
-  if (sourceCategory === "DEP") return "SID";
+  if (sourceCategory === "DEP" || sourceCategory === "SID") return "SID";
+  if (sourceCategory === "TAXI") return "TAXI";
   if (sourceCategory === "REF") return "REF";
 
   // XFlySim 的 APT 同时包含机场地面图和机场简报，不能直接归为同一类。
@@ -99,7 +99,7 @@ export function AirportsPage() {
   const [selected, setSelected] = useState<Airport>(airports[0]);
   const [tab, setTab] = useState<AirportTab>("overview");
   const [selectedStand, setSelectedStand] = useState("");
-  const [chartFilter, setChartFilter] = useState<AirportChartFilter>("全部");
+  const [chartFilter, setChartFilter] = useState<AirportChartCategory>("STAR");
   const adHp = useQuery({ queryKey: ["ad-hp-airports"], queryFn: loadAdHpAirports, staleTime: Infinity });
   const navigation = useQuery({ queryKey: ["navigation-database"], queryFn: getNavigationDatabaseStatus, retry: 0 });
   const navigationAirports = useQuery({ queryKey: ["navigation-airports", query], queryFn: () => searchNavigationAirports(query), enabled: navigation.data?.ready, retry: 0 });
@@ -122,13 +122,12 @@ export function AirportsPage() {
   const chartSections = useMemo(() => airportChartCategories.map((category) => ({
     ...category,
     charts: (xfly.data?.charts ?? []).filter((chart) => categoryForAirportChart(chart) === category.id).sort((first, second) => first.indexNumber.localeCompare(second.indexNumber, undefined, { numeric: true })),
-  })).filter((section) => section.charts.length > 0), [xfly.data?.charts]);
-  const visibleChartSections = chartFilter === "全部" ? chartSections : chartSections.filter((section) => section.id === chartFilter);
-  const chartCounts = useMemo(() => new Map(chartSections.map((section) => [section.id, section.charts.length])), [chartSections]);
+  })), [xfly.data?.charts]);
+  const visibleChartSections = chartSections.filter((section) => section.id === chartFilter);
 
   useEffect(() => { const chinese = adHpByIcao.get(selected.icao); if (chinese && selected.name !== chinese.name) setSelected((current) => ({ ...current, ...chinese })); }, [adHpByIcao, selected.icao, selected.name]);
 
-  const chooseAirport = (airport: Airport) => { setSelected(airport); setSelectedStand(""); setChartFilter("全部"); setTab("overview"); };
+  const chooseAirport = (airport: Airport) => { setSelected(airport); setSelectedStand(""); setChartFilter("STAR"); setTab("overview"); };
   const sourceName = navigation.data?.source === "fenix" ? "Fenix" : "Little Navmap";
   const sourceLabel = navigation.data?.ready ? `${sourceName} · 国内机场名称由 AD_HP.csv 覆盖` : `AD_HP.csv · ${adHp.data?.length ?? 0} 个国内机场`;
 
@@ -140,13 +139,13 @@ export function AirportsPage() {
         : <div className="airport-chart-browser">
           {xfly.isFetching && <p className="empty-data">正在读取航图目录…</p>}
           {!!xfly.data?.charts.length && <div className="airport-chart-filters" aria-label="按航图用途筛选">
-            <button className={chartFilter === "全部" ? "active" : ""} onClick={() => setChartFilter("全部")}>全部 <span>{xfly.data.charts.length}</span></button>
-            {airportChartCategories.map((category) => <button key={category.id} className={chartFilter === category.id ? "active" : ""} disabled={!chartCounts.get(category.id)} onClick={() => setChartFilter(category.id)}>{category.label} <span>{chartCounts.get(category.id) ?? 0}</span></button>)}
+            {airportChartCategories.map((category) => <button key={category.id} data-category={category.id} className={chartFilter === category.id ? "active" : ""} onClick={() => setChartFilter(category.id)}>{category.label}</button>)}
           </div>}
           {visibleChartSections.map((section) => <section className="airport-chart-section" key={section.id}>
             <header><div><strong>{section.label}</strong><span>{section.description}</span></div><em>{section.charts.length} 份</em></header>
             <div className="airport-chart-grid">{section.charts.map((chart) => <a key={chart.id} className="airport-chart-card" href={chart.imageDayUrl} target="_blank" rel="noreferrer"><AirportChartThumbnail chart={chart} /><span><strong>{chart.indexNumber} · {chart.name}</strong><small>{section.label} · 修订 {chart.revisionDate || "未知"}</small></span><ExternalLink size={15} /></a>)}</div>
           </section>)}
+          {!xfly.isFetching && !!xfly.data?.charts.length && visibleChartSections.every((section) => section.charts.length === 0) && <p className="empty-data">{chartFilter} 分类暂无航图。</p>}
           {!xfly.isFetching && !xfly.data?.charts.length && <p className="empty-data">此机场暂无在线航图。</p>}
         </div>}
     </section>
