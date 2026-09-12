@@ -173,6 +173,8 @@ export interface XflyAirportData {
   cached: boolean;
 }
 
+export type NavigraphChart = XflyAirportData["charts"][number];
+
 export const isTauri = () => "__TAURI_INTERNALS__" in window;
 
 export async function listFlightPlans(): Promise<FlightPlan[]> {
@@ -300,4 +302,14 @@ export async function getXflyAirportData(icao: string, preferCache = false): Pro
 export async function getXflyChartThumbnail(chartId: string, revisionDate: string, sourceUrls: string[]): Promise<string> {
   if (!isTauri()) throw new Error("航图缩略图缓存仅在桌面应用中可用");
   return invoke<string>("get_xfly_chart_thumbnail", { chartId, revisionDate, sourceUrls });
+}
+
+export async function listNavigraphCharts(icao: string): Promise<NavigraphChart[]> {
+  if (isTauri()) return invoke<NavigraphChart[]>("list_navigraph_charts", { icao });
+  return (await fetchJsonWithRetry<{ data: NavigraphChart[] }>(`https://api.xflysim.com/pilot/api/efb/charts/${icao}`, { timeoutMs: 12_000, retries: 1 })).data;
+}
+
+export async function getXflyChartImage(chartId: string, revisionDate: string, sourceUrls: string[]): Promise<string> {
+  if (!isTauri()) throw new Error("航图图片缓存仅在桌面应用中可用");
+  return invoke<string>("get_xfly_chart_image", { chartId, revisionDate, sourceUrls });
 }

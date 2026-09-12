@@ -90,8 +90,9 @@ fn cache_path(app: &AppHandle, icao: &str) -> Result<PathBuf, String> {
     Ok(directory.join(format!("{icao}.json")))
 }
 
-fn thumbnail_cache_path(
+fn chart_asset_cache_path(
     app: &AppHandle,
+    directory_name: &str,
     chart_id: &str,
     revision_date: &str,
 ) -> Result<PathBuf, String> {
@@ -99,7 +100,7 @@ fn thumbnail_cache_path(
         .path()
         .app_local_data_dir()
         .map_err(|error| error.to_string())?
-        .join("chart-thumbnails");
+        .join(directory_name);
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let revision = revision_date
         .chars()
@@ -126,6 +127,38 @@ fn write_cache(app: &AppHandle, icao: &str, data: &XflyAirportData) -> Result<()
     fs::write(
         &temporary,
         serde_json::to_vec(data).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    if path.exists() {
+        fs::remove_file(&path).map_err(|error| error.to_string())?;
+    }
+    fs::rename(temporary, path).map_err(|error| error.to_string())
+}
+
+fn chart_list_cache_path(app: &AppHandle, icao: &str) -> Result<PathBuf, String> {
+    let directory = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("navigraph-chart-cache");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.join(format!("{icao}.json")))
+}
+
+fn read_chart_list_cache(app: &AppHandle, icao: &str) -> Option<Vec<AirportChart>> {
+    serde_json::from_slice(&fs::read(chart_list_cache_path(app, icao).ok()?).ok()?).ok()
+}
+
+fn write_chart_list_cache(
+    app: &AppHandle,
+    icao: &str,
+    charts: &[AirportChart],
+) -> Result<(), String> {
+    let path = chart_list_cache_path(app, icao)?;
+    let temporary = path.with_extension("json.tmp");
+    fs::write(
+        &temporary,
+        serde_json::to_vec(charts).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?;
     if path.exists() {
@@ -173,12 +206,12 @@ async fn fetch_endpoint<T: DeserializeOwned>(
     Err(last_error)
 }
 
-#[tauri::command]
-pub async fn get_xfly_chart_thumbnail(
+async fn download_chart_asset(
     app: AppHandle,
     chart_id: String,
     revision_date: String,
     source_urls: Vec<String>,
+    cache_directory: &str,
 ) -> Result<String, String> {
     let chart_id = chart_id.trim().to_uppercase();
     if chart_id.is_empty()
@@ -189,7 +222,7 @@ pub async fn get_xfly_chart_thumbnail(
         return Err("航图 ID 无效".to_string());
     }
 
-    let target = thumbnail_cache_path(&app, &chart_id, &revision_date)?;
+    let target = chart_asset_cache_path(&app, cache_directory, &chart_id, &revision_date)?;
     if target.exists() {
         return Ok(target.to_string_lossy().to_string());
     }
@@ -247,6 +280,60 @@ pub async fn get_xfly_chart_thumbnail(
     }
 
     Err("航图缩略图与完整图均不可用".to_string())
+}
+
+#[tauri::command]
+pub async fn get_xfly_chart_thumbnail(
+    app: AppHandle,
+    chart_id: String,
+    revision_date: String,
+    source_urls: Vec<String>,
+) -> Result<String, String> {
+    download_chart_asset(
+        app,
+        chart_id,
+        revision_date,
+        source_urls,
+        "chart-thumbnails",
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_xfly_chart_image(
+    app: AppHandle,
+    chart_id: String,
+    revision_date: String,
+    source_urls: Vec<String>,
+) -> Result<String, String> {
+    download_chart_asset(app, chart_id, revision_date, source_urls, "chart-images").await
+}
+
+#[tauri::command]
+pub async fn list_navigraph_charts(
+    app: AppHandle,
+    icao: String,
+) -> Result<Vec<AirportChart>, String> {
+    let icao = icao.trim().to_uppercase();
+    if icao.len() != 4
+        || !icao
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return Err("ICAO 机场代码无效".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .user_agent("SkyBoard-EFB/1.0")
+        .build()
+        .map_err(|_| "无法创建 NAVIGRAPH 航图请求".to_string())?;
+    match fetch_endpoint::<Vec<AirportChart>>(&client, "charts", &icao).await {
+        Ok(charts) => {
+            let _ = write_chart_list_cache(&app, &icao, &charts);
+            Ok(charts)
+        }
+        Err(error) => read_chart_list_cache(&app, &icao).ok_or(error),
+    }
 }
 
 #[tauri::command]

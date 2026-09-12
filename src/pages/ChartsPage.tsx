@@ -7,14 +7,15 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Archive, ArrowLeft, BookOpen, Building2, ChevronLeft, ChevronRight, Download, ExternalLink, FilePlus2, FileText, FolderOpen, Minus, PenLine, Plus, RefreshCw, RotateCw, Search, Trash2 } from "lucide-react";
-import { cacheChartPdf, getLocalChartLibraryStatus, isTauri, listChartFoxCharts, listLocalCharts, openLocalChart, setLocalChartLibrary } from "../lib/tauri";
+import { cacheChartPdf, getLocalChartLibraryStatus, getXflyChartImage, isTauri, listChartFoxCharts, listLocalCharts, listNavigraphCharts, openLocalChart, setLocalChartLibrary, type NavigraphChart } from "../lib/tauri";
 import type { Chart } from "../types";
 import { StatusBadge } from "../components/common/StatusBadge";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
 type PdfSource = File | string;
-type ChartSource = "local" | "chartfox";
+type ChartSource = "local" | "navigraph" | "chartfox";
+type NavigraphCategory = "STAR" | "APP" | "TAXI" | "SID" | "REF";
 type InkPoint = { x: number; y: number };
 type InkStroke = { points: InkPoint[]; color: string; width: number };
 type AirportChartGroup = { airport: string; charts: Chart[] };
@@ -24,6 +25,25 @@ function categoryForChartFox(type: string): Chart["category"] {
   if (/departure|sid/i.test(type)) return "离场";
   if (/enroute|route/i.test(type)) return "航路";
   return "机场";
+}
+
+function categoryForNavigraph(chart: NavigraphChart): NavigraphCategory {
+  const category = chart.category.trim().toUpperCase();
+  if (category === "ARR") return "STAR";
+  if (category === "APP") return "APP";
+  if (category === "DEP") return "SID";
+  if (category === "APT" && /airport|parking|stands?|taxi|apron|ground|hot\s*spots?/i.test(chart.name)) return "TAXI";
+  return "REF";
+}
+
+function localCategoryForNavigraph(category: NavigraphCategory): Chart["category"] {
+  if (category === "STAR" || category === "APP") return "进场";
+  if (category === "SID") return "离场";
+  return "机场";
+}
+
+function navigraphRevision(value: string) {
+  return /^(\d{4})(\d{2})(\d{2})$/.test(value) ? value.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3") : value || "未知";
 }
 
 function airportChartSummary(chartsForAirport: Chart[]) {
@@ -41,10 +61,14 @@ export function ChartsPage() {
   const [category, setCategory] = useState<"全部" | Chart["category"]>("全部");
   const [source, setSource] = useState<ChartSource>("local");
   const [selectedAirport, setSelectedAirport] = useState("");
+  const [navigraphIcao, setNavigraphIcao] = useState(/^[A-Z0-9]{4}$/.test(requestedIcao) ? requestedIcao : "ZBAA");
+  const [navigraphCategory, setNavigraphCategory] = useState<NavigraphCategory>("STAR");
   const [chartFoxIcao, setChartFoxIcao] = useState(/^[A-Z0-9]{4}$/.test(requestedIcao) ? requestedIcao : "ZBAA");
   const [selected, setSelected] = useState<Chart | null>(null);
-  const [chartFoxUrl, setChartFoxUrl] = useState("");
+  const [externalChartUrl, setExternalChartUrl] = useState("");
   const [pdfSource, setPdfSource] = useState<PdfSource | null>(null);
+  const [imageSource, setImageSource] = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
   const [fileName, setFileName] = useState("");
   const [pageCount, setPageCount] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
@@ -60,6 +84,7 @@ export function ChartsPage() {
   const inkCanvasRef = useRef<HTMLCanvasElement>(null);
   const inkByPageRef = useRef(new Map<number, InkStroke[]>());
   const activeStrokeRef = useRef<InkStroke | null>(null);
+  const imageRequestRef = useRef(0);
 
   const resetPdfTools = () => {
     setPageCount(0);
@@ -74,7 +99,10 @@ export function ChartsPage() {
     if (context && inkCanvasRef.current) context.clearRect(0, 0, inkCanvasRef.current.width, inkCanvasRef.current.height);
   };
   const resetPreview = () => {
+    imageRequestRef.current += 1;
     setPdfSource(null);
+    setImageSource("");
+    setImageLoading(false);
     setFileName("");
     setError("");
     resetPdfTools();
@@ -82,6 +110,7 @@ export function ChartsPage() {
 
   const localLibrary = useQuery({ queryKey: ["local-chart-library"], queryFn: getLocalChartLibraryStatus, retry: 0 });
   const localCharts = useQuery({ queryKey: ["local-charts"], queryFn: listLocalCharts, enabled: source === "local" && localLibrary.data?.ready, retry: 0 });
+  const navigraph = useQuery({ queryKey: ["navigraph-charts", navigraphIcao], queryFn: () => listNavigraphCharts(navigraphIcao), enabled: source === "navigraph" && navigraphIcao.length === 4, retry: 1 });
   const chartFox = useQuery({ queryKey: ["chartfox", chartFoxIcao], queryFn: () => listChartFoxCharts(chartFoxIcao), enabled: source === "chartfox" && chartFoxIcao.length === 4, retry: 1 });
   const localLibraryMutation = useMutation({
     mutationFn: setLocalChartLibrary,
@@ -110,12 +139,13 @@ export function ChartsPage() {
     const normalizedQuery = query.trim().toLowerCase();
     return (airportGroups.find((group) => group.airport === selectedAirport)?.charts ?? []).filter((chart) => (category === "全部" || chart.category === category) && (!normalizedQuery || chart.title.toLowerCase().includes(normalizedQuery)));
   }, [airportGroups, category, query, selectedAirport]);
+  const visibleNavigraphCharts = useMemo(() => (navigraph.data ?? []).filter((chart) => categoryForNavigraph(chart) === navigraphCategory), [navigraph.data, navigraphCategory]);
 
   useEffect(() => {
     if (!/^[A-Z0-9]{4}$/.test(requestedIcao) || appliedRequestedIcao.current === requestedIcao) return;
     if (localLibrary.isFetching || (localLibrary.data?.ready && localCharts.isFetching)) return;
     setSelected(null);
-    setChartFoxUrl("");
+    setExternalChartUrl("");
     setQuery("");
     setCategory("全部");
     resetPreview();
@@ -123,8 +153,9 @@ export function ChartsPage() {
       setSource("local");
       setSelectedAirport(requestedIcao);
     } else {
-      setSource("chartfox");
+      setSource("navigraph");
       setSelectedAirport("");
+      setNavigraphIcao(requestedIcao);
       setChartFoxIcao(requestedIcao);
     }
     appliedRequestedIcao.current = requestedIcao;
@@ -244,6 +275,7 @@ export function ChartsPage() {
   const switchSource = (nextSource: ChartSource) => {
     setSource(nextSource);
     setSelected(null);
+    setExternalChartUrl("");
     setQuery("");
     setCategory("全部");
     setError("");
@@ -260,16 +292,38 @@ export function ChartsPage() {
     setCategory("全部");
   };
   const chooseChart = (chart: Chart) => {
-    setSelected(chart);
-    setChartFoxUrl("");
     resetPreview();
+    setSelected(chart);
+    setExternalChartUrl("");
   };
   const chooseChartFox = (chart: { id: string; title: string; chartType: string; url: string }) => {
-    setSelected({ id: `chartfox-${chart.id}`, airport: chartFoxIcao, category: categoryForChartFox(chart.chartType), title: chart.title, revision: "ChartFox", cached: false });
-    setChartFoxUrl(chart.url);
     resetPreview();
+    setSelected({ id: `chartfox-${chart.id}`, airport: chartFoxIcao, category: categoryForChartFox(chart.chartType), title: chart.title, revision: "ChartFox", cached: false });
+    setExternalChartUrl(chart.url);
+  };
+  const chooseNavigraphChart = async (chart: NavigraphChart) => {
+    resetPreview();
+    const chartCategory = categoryForNavigraph(chart);
+    const sourceUrls = [chart.imageDayUrl, chart.imageNightUrl, chart.thumbDayUrl, chart.thumbNightUrl].filter(Boolean);
+    const requestId = ++imageRequestRef.current;
+    setSelected({ id: `navigraph-${chart.id}`, airport: navigraphIcao, category: localCategoryForNavigraph(chartCategory), title: `${chart.indexNumber} · ${chart.name}`, revision: navigraphRevision(chart.revisionDate), cached: false });
+    setExternalChartUrl(sourceUrls[0] ?? "");
+    setFileName(`${chart.indexNumber} · ${chart.name}`);
+    setImageLoading(true);
+    try {
+      const imageUrl = isTauri() ? convertFileSrc(await getXflyChartImage(chart.id, chart.revisionDate, sourceUrls)) : sourceUrls[0];
+      if (!imageUrl) throw new Error("此航图没有可用图片");
+      if (imageRequestRef.current === requestId) setImageSource(imageUrl);
+    } catch (reason) {
+      if (imageRequestRef.current === requestId) setError(reason instanceof Error ? reason.message : "无法打开 NAVIGRAPH 航图");
+    } finally {
+      if (imageRequestRef.current === requestId) setImageLoading(false);
+    }
   };
   const loadPdf = (file: File) => {
+    imageRequestRef.current += 1;
+    setImageSource("");
+    setImageLoading(false);
     setPdfSource(file);
     setFileName(file.name);
     setError("");
@@ -315,7 +369,7 @@ export function ChartsPage() {
 
   return <div className="chart-page split-page">
     <section className="panel chart-sidebar">
-      <div className="chart-source-selector"><button className={source === "local" ? "active" : ""} onClick={() => switchSource("local")}>本地航图库</button><button className={source === "chartfox" ? "active" : ""} onClick={() => switchSource("chartfox")}>CHARTFOX</button></div>
+      <div className="chart-source-selector"><button className={source === "local" ? "active" : ""} onClick={() => switchSource("local")}>本地航图库</button><button className={source === "navigraph" ? "active" : ""} onClick={() => switchSource("navigraph")}>NAVIGRAPH</button><button className={source === "chartfox" ? "active" : ""} onClick={() => switchSource("chartfox")}>CHARTFOX</button></div>
       {source === "local" ? <>
         <div className="local-library-actions"><button className="button secondary" onClick={() => chooseLibrary("folder")} disabled={localLibraryMutation.isPending}><FolderOpen size={16} />选择文件夹</button><button className="button secondary" onClick={() => chooseLibrary("zip")} disabled={localLibraryMutation.isPending}><Archive size={16} />选择 ZIP</button></div>
         <p className="source-description">选择 <code>Terminal</code> 文件夹或其上级目录。第一层 <code>&lt;ICAO&gt;/</code> 文件夹用于机场分类，同级 <code>Charts.csv</code> 用于读取航图编号和类型。</p>
@@ -331,12 +385,17 @@ export function ChartsPage() {
           <div className="chart-filter">{(["全部", "机场", "进场", "离场", "航路"] as const).map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div>
           <div className="chart-list">{visibleAirportCharts.map((chart) => <button key={chart.id} onClick={() => chooseLocalChart(chart)} className={selected?.id === chart.id ? "selected" : ""}><FileText size={18} /><span><strong>{chart.title}</strong><small>{chart.category} · {chart.revision}</small></span><Download size={15} className="cached-icon" /></button>)}{visibleAirportCharts.length === 0 && <p className="chartfox-state">当前筛选条件下没有航图。</p>}</div>
         </>}
+      </> : source === "navigraph" ? <>
+        <div className="chartfox-search"><label>ICAO 机场代码<input value={navigraphIcao} maxLength={4} onChange={(event) => { setNavigraphIcao(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setSelected(null); setExternalChartUrl(""); resetPreview(); }} /></label><button className="icon-button" onClick={() => navigraph.refetch()} disabled={navigraph.isFetching || navigraphIcao.length !== 4} aria-label="刷新 NAVIGRAPH"><RefreshCw className={navigraph.isFetching ? "spinning" : ""} size={17} /></button></div>
+        <p className="source-description">NAVIGRAPH 航图按用途分为 STAR、APP、TAXI、SID、REF 五类，点击航图即可下载并预览。</p>
+        <div className="airport-chart-filters navigraph-chart-filters">{(["STAR", "APP", "TAXI", "SID", "REF"] as const).map((item) => <button key={item} data-category={item} className={navigraphCategory === item ? "active" : ""} onClick={() => setNavigraphCategory(item)}>{item}</button>)}</div>
+        <div className="chart-list">{navigraph.isFetching && <p className="chartfox-state">正在查询 NAVIGRAPH…</p>}{navigraph.isError && <p className="chartfox-state error">{navigraph.error.message}</p>}{navigraph.data?.length === 0 && <p className="chartfox-state">此机场暂无可用航图。</p>}{navigraph.data && navigraph.data.length > 0 && visibleNavigraphCharts.length === 0 && <p className="chartfox-state">此机场暂无 {navigraphCategory} 类航图。</p>}{visibleNavigraphCharts.map((chart) => <button key={chart.id} onClick={() => chooseNavigraphChart(chart)} className={selected?.id === `navigraph-${chart.id}` ? "selected" : ""}><FileText size={18} /><span><strong>{chart.indexNumber} · {chart.name}</strong><small>{categoryForNavigraph(chart)} · 修订 {navigraphRevision(chart.revisionDate)}</small></span><Download size={15} className="cached-icon" /></button>)}</div>
       </> : <>
         <div className="chartfox-search"><label>ICAO 机场代码<input value={chartFoxIcao} maxLength={4} onChange={(event) => setChartFoxIcao(event.target.value.toUpperCase())} /></label><button className="icon-button" onClick={() => chartFox.refetch()} disabled={chartFox.isFetching} aria-label="刷新 ChartFox"><RefreshCw className={chartFox.isFetching ? "spinning" : ""} size={17} /></button></div><p className="source-description">ChartFox 提供的航图索引。可用性、内容与许可由 ChartFox 决定。</p><div className="chart-list">{chartFox.isFetching && <p className="chartfox-state">正在查询 ChartFox…</p>}{chartFox.isError && <p className="chartfox-state error">{chartFox.error.message}</p>}{chartFox.data?.length === 0 && <p className="chartfox-state">此机场暂无可用航图。</p>}{chartFox.data?.map((chart) => <button key={chart.id} onClick={() => chooseChartFox(chart)} className={selected?.id === `chartfox-${chart.id}` ? "selected" : ""}><FileText size={18} /><span><strong>{chart.title}</strong><small>{chart.chartType || "CHARTFOX"} · {chartFoxIcao}</small></span><ExternalLink size={15} className="cached-icon" /></button>)}</div>
       </>}
     </section>
     <section className="chart-viewer">
-      <div className="chart-viewer-header"><div><p className="eyebrow">{selected ? `${selected.airport} · ${source === "chartfox" ? "CHARTFOX" : selected.category}` : "航图预览"}</p><h2>{pdfSource ? fileName : selected?.title ?? "请选择机场与航图"}</h2></div><StatusBadge tone={pdfSource ? "success" : selected ? "warning" : "neutral"}>{pdfSource ? "本地已打开" : selected ? source === "chartfox" ? "在线索引" : "未打开" : "等待选择"}</StatusBadge></div>
+      <div className="chart-viewer-header"><div><p className="eyebrow">{selected ? `${selected.airport} · ${source === "navigraph" ? "NAVIGRAPH" : source === "chartfox" ? "CHARTFOX" : selected.category}` : "航图预览"}</p><h2>{pdfSource || imageSource ? fileName : selected?.title ?? "请选择机场与航图"}</h2></div><StatusBadge tone={pdfSource || imageSource ? "success" : selected ? "warning" : "neutral"}>{pdfSource ? "本地已打开" : imageSource ? "航图已打开" : imageLoading ? "正在加载" : selected ? source === "chartfox" ? "在线索引" : "未打开" : "等待选择"}</StatusBadge></div>
       <input className="visually-hidden" ref={inputRef} type="file" accept="application/pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) loadPdf(file); }} />
       {pdfSource ? <>
         <div className="pdf-toolbar">
@@ -345,10 +404,10 @@ export function ChartsPage() {
           <div className="pdf-toolbar-group pdf-page-controls"><button disabled={pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)} aria-label="上一页"><ChevronLeft size={17} /></button><span>{pageNumber} / {pageCount || "–"}</span><button disabled={pageCount === 0 || pageNumber >= pageCount} onClick={() => setPageNumber((page) => page + 1)} aria-label="下一页"><ChevronRight size={17} /></button></div>
         </div>
         <div className="pdf-viewer" ref={viewerRef}><Document file={pdfSource} onLoadSuccess={({ numPages }: { numPages: number }) => { setPageCount(numPages); setPageNumber(1); }} onLoadError={(reason) => setError(`无法读取 PDF：${reason instanceof Error ? reason.message : "文件加载失败"}`)} loading={<div className="pdf-loading">正在渲染航图…</div>}><div className="pdf-page-stage" ref={pageStageRef}><Page pageNumber={pageNumber} width={pageWidth} rotate={rotation} renderTextLayer renderAnnotationLayer /><canvas ref={inkCanvasRef} className={`pdf-ink-canvas ${drawMode ? "active" : ""}`} onPointerDown={startInk} onPointerMove={continueInk} onPointerUp={finishInk} onPointerCancel={finishInk} /></div></Document></div>
-      </> : <div className="chart-placeholder"><BookOpen size={42} /><strong>{selected ? "尚未打开 PDF" : "没有正在预览的航图"}</strong><p>{selected ? "点击本地航图可直接打开，或导入一份合法授权的 PDF。" : "先选择本地航图库中的机场与航图，或切换到 ChartFox 查询。"}</p></div>}
-      <div className="chart-controls"><button className="button secondary" onClick={importPdf}><FilePlus2 size={17} />导入单份 PDF</button>{chartFoxUrl && <a className="button secondary" href={chartFoxUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />在 ChartFox 查看</a>}{!isTauri() && <span className="chart-cache-note"><BookOpen size={15} />浏览器模式仅临时预览</span>}</div>
+      </> : imageSource ? <div className="chart-image-viewer"><img src={imageSource} alt={selected?.title ?? "NAVIGRAPH 航图"} onError={() => { setImageSource(""); setError("航图图片加载失败"); }} /></div> : <div className="chart-placeholder"><BookOpen size={42} /><strong>{imageLoading ? "正在下载航图…" : selected ? source === "chartfox" ? "在线航图索引" : "尚未打开航图" : "没有正在预览的航图"}</strong><p>{imageLoading ? "正在获取完整航图图片，请稍候。" : selected ? source === "chartfox" ? "请使用下方按钮在 ChartFox 查看，或导入一份合法授权的 PDF。" : "点击本地或 NAVIGRAPH 航图可直接打开，也可导入 PDF。" : "先选择本地航图库或在线航图来源中的机场与航图。"}</p></div>}
+      <div className="chart-controls"><button className="button secondary" onClick={importPdf}><FilePlus2 size={17} />导入单份 PDF</button>{externalChartUrl && <a className="button secondary" href={externalChartUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />{source === "chartfox" ? "在 ChartFox 查看" : "打开原始航图"}</a>}{!isTauri() && <span className="chart-cache-note"><BookOpen size={15} />浏览器模式仅临时预览</span>}</div>
       {error && <p className="form-error">{error}</p>}
-      <div className="chart-meta"><span>来源：{source === "chartfox" ? "ChartFox" : localLibrary.data?.sourceType === "zip" ? "本地 ZIP" : "本地文件夹"}</span><span>格式：PDF</span><span>请遵守数据源的使用条款</span></div>
+      <div className="chart-meta"><span>来源：{source === "navigraph" ? "NAVIGRAPH" : source === "chartfox" ? "ChartFox" : localLibrary.data?.sourceType === "zip" ? "本地 ZIP" : "本地文件夹"}</span><span>格式：{imageSource || source === "navigraph" ? "图片" : "PDF"}</span><span>请遵守数据源的使用条款</span></div>
     </section>
   </div>;
 }

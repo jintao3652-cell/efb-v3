@@ -9,7 +9,10 @@ mod simbrief;
 mod weather;
 
 pub use airac::get_current_airac_cycle;
-pub use airport::{get_xfly_airport_data, get_xfly_chart_thumbnail};
+pub use airport::{
+    get_xfly_airport_data, get_xfly_chart_image, get_xfly_chart_thumbnail,
+    list_navigraph_charts,
+};
 pub use chart::{
     cache_chart_pdf, clear_chart_cache, get_local_chart_library_status, list_local_charts,
     open_local_chart, set_local_chart_library,
