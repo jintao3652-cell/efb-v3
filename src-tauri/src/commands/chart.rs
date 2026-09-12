@@ -613,6 +613,7 @@ pub fn clear_chart_cache(app: AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     for name in [
         "chart-cache",
+        "chart-thumbnails",
         "weather-cache",
         "airport-cache",
         "airac-cache",

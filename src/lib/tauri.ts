@@ -291,3 +291,8 @@ export async function getXflyAirportData(icao: string, preferCache = false): Pro
     cached: false,
   };
 }
+
+export async function getXflyChartThumbnail(chartId: string, revisionDate: string, sourceUrls: string[]): Promise<string> {
+  if (!isTauri()) throw new Error("航图缩略图缓存仅在桌面应用中可用");
+  return invoke<string>("get_xfly_chart_thumbnail", { chartId, revisionDate, sourceUrls });
+}

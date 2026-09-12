@@ -1,5 +1,9 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{fs, path::PathBuf, time::Duration};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tauri::{AppHandle, Manager};
 
 const API_ROOT: &str = "https://api.xflysim.com/pilot/api/efb";
@@ -86,6 +90,32 @@ fn cache_path(app: &AppHandle, icao: &str) -> Result<PathBuf, String> {
     Ok(directory.join(format!("{icao}.json")))
 }
 
+fn thumbnail_cache_path(
+    app: &AppHandle,
+    chart_id: &str,
+    revision_date: &str,
+) -> Result<PathBuf, String> {
+    let directory = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("chart-thumbnails");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let revision = revision_date
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>();
+    Ok(directory.join(format!("{chart_id}-{revision}.png")))
+}
+
+fn supported_chart_image(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"GIF87a")
+        || bytes.starts_with(b"GIF89a")
+        || bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP")
+}
+
 fn read_cache(app: &AppHandle, icao: &str) -> Option<XflyAirportData> {
     serde_json::from_slice(&fs::read(cache_path(app, icao).ok()?).ok()?).ok()
 }
@@ -141,6 +171,82 @@ async fn fetch_endpoint<T: DeserializeOwned>(
         }
     }
     Err(last_error)
+}
+
+#[tauri::command]
+pub async fn get_xfly_chart_thumbnail(
+    app: AppHandle,
+    chart_id: String,
+    revision_date: String,
+    source_urls: Vec<String>,
+) -> Result<String, String> {
+    let chart_id = chart_id.trim().to_uppercase();
+    if chart_id.is_empty()
+        || !chart_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+    {
+        return Err("航图 ID 无效".to_string());
+    }
+
+    let target = thumbnail_cache_path(&app, &chart_id, &revision_date)?;
+    if target.exists() {
+        return Ok(target.to_string_lossy().to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent("SkyBoard-EFB/1.0")
+        .build()
+        .map_err(|_| "无法创建航图图片请求".to_string())?;
+
+    for source_url in source_urls {
+        let Ok(url) = reqwest::Url::parse(&source_url) else {
+            continue;
+        };
+        if url.scheme() != "https" {
+            continue;
+        }
+        let Some(host) = url.host_str() else {
+            continue;
+        };
+        if host != "vip.123pan.cn" && !host.ends_with(".123clouddisk.com") {
+            continue;
+        }
+
+        let Ok(response) = client.get(url).send().await else {
+            continue;
+        };
+        let Ok(response) = response.error_for_status() else {
+            continue;
+        };
+        let Ok(bytes) = response.bytes().await else {
+            continue;
+        };
+        if !supported_chart_image(&bytes) {
+            continue;
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temporary = target.with_extension(format!("png.{nonce}.tmp"));
+        fs::write(&temporary, &bytes).map_err(|error| error.to_string())?;
+        match fs::rename(&temporary, &target) {
+            Ok(()) => return Ok(target.to_string_lossy().to_string()),
+            Err(_) if target.exists() => {
+                let _ = fs::remove_file(&temporary);
+                return Ok(target.to_string_lossy().to_string());
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&temporary);
+                return Err(error.to_string());
+            }
+        }
+    }
+
+    Err("航图缩略图与完整图均不可用".to_string())
 }
 
 #[tauri::command]
