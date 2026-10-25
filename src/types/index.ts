@@ -74,6 +74,8 @@ export interface Airport {
   name: string;
   city: string;
   elevation: string;
+  /** AD_HP 的 IS_INTERNATIONAL；用于地图低缩放级别的标签分级。 */
+  international?: boolean;
   runways: string[];
   frequencies: Array<{ name: string; value: string }>;
   latitude: number;
@@ -97,7 +99,8 @@ export interface WeatherReport {
   temperature: string;
   qnh: string;
   observedAt: string;
-  source: "实时" | "缓存" | "OpenWeather" | "中国气象局航空气象";
+  /** caac 航空气象后端逐级兜底后的实际来源，如「caac 航空气象 · faa」 */
+  source: string;
   taf: string;
   previewUrl?: string;
 }

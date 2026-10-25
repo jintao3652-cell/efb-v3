@@ -137,11 +137,19 @@ export interface LocalChart {
   airport: string;
   title: string;
   category: "机场" | "进场" | "离场" | "航路";
+  /** 图号（Charts.csv 的 PAGE_NUMBER，如 0C-01） */
   revision: string;
+  /** Charts.csv 的 ChartName：机场图 / RWY03 这类人读名称 */
+  name?: string;
+  /** Charts.csv 的 ChartTypeEx_CH：标准仪表进场图 / 仪表进近图_ILS */
+  chartType?: string;
 }
 
+/** 导航数据库格式：LNM / Fenix 旧库 / Navigraph DFD v2（后端按表结构自动识别） */
+export type NavigationDatabaseSource = "lnm" | "fenix" | "dfdv2";
+
 export interface NavigationDatabaseStatus {
-  source: "lnm" | "fenix";
+  source: NavigationDatabaseSource;
   databasePath?: string;
   ready: boolean;
   airacCycle?: string;
@@ -171,7 +179,7 @@ export interface NavigationProcedureSummary {
 }
 
 export interface NavigationAirportProcedures {
-  source: "lnm" | "fenix";
+  source: NavigationDatabaseSource;
   ready: boolean;
   message: string;
   sids: NavigationProcedureSummary[];
@@ -248,6 +256,88 @@ export async function getLocalChartLibraryStatus(): Promise<LocalChartLibrarySta
   return invoke<LocalChartLibraryStatus>("get_local_chart_library_status");
 }
 
+/* ------------------------------------------------- NAIP 数据包（AD_HP / 班机航路） */
+
+/** AD_HP.csv 的一行：坐标给的是原始度分秒串，由前端统一解析。 */
+export interface NaipAirport {
+  icao: string;
+  name: string;
+  iata: string;
+  international: boolean;
+  latitudeRaw: string;
+  longitudeRaw: string;
+  elevation: string;
+}
+
+/** FLIGHT_AIRLINE.csv 的一行：CAAC 批准的班机航路。 */
+export interface NaipRoute {
+  id: string;
+  name: string;
+  departure: string;
+  arrival: string;
+  /** 已去掉首尾机场码，可直接提交给 FSD。 */
+  route: string;
+  /** 拼进航路串的航段数；为 0 表示航段表里没这条航路的数据。 */
+  legs: number;
+  distanceNm: number | null;
+  /** CSV 的 Routes 原文（中文描述），供用户对照。 */
+  description: string;
+}
+
+export interface NaipStatus {
+  root: string | null;
+  airportFile: string | null;
+  routeFile: string | null;
+  pointFile: string | null;
+  airportCount: number;
+  routeCount: number;
+  airportMessage: string;
+  routeMessage: string;
+}
+
+/** 本地数据包里的机场（含中文名）。未配置数据包时抛错，由调用方回退内置 CSV。 */
+export async function getLocalAirports(): Promise<NaipAirport[]> {
+  if (!isTauri()) throw new Error("本地机场库仅在桌面应用中可用");
+  return invoke<NaipAirport[]>("get_local_airports");
+}
+
+/** 按起降场查班机航路；浏览器模式没有本地数据包，返回空列表。 */
+export async function searchFlightRoutes(dep: string, arr: string, limit = 24): Promise<NaipRoute[]> {
+  if (!isTauri()) return [];
+  return invoke<NaipRoute[]>("search_flight_routes", { dep, arr, limit });
+}
+
+/** 班机航路的航点解析结果：航点来自 FLIGHT_AIRLINE_POINT.csv，坐标查本地导航库。 */
+export interface NaipRoutePoints {
+  /** 航段端点总数（含起降衔接点）。 */
+  total: number;
+  /** 按航段顺序排好的航点（只含有坐标的）。 */
+  points: FlightRoutePoint[];
+  /** 导航库与机场库都没查到坐标的标识。 */
+  missing: string[];
+  /** 解析过程的提示（如导航库不可用）。 */
+  note: string;
+}
+
+/**
+ * 班机航路的航路点：**不走 XFS**——后端直接解析 FLIGHT_AIRLINE_POINT.csv 的
+ * 航段端点序列，坐标查本地导航库（DFD v2 / LNM / Fenix）+ AD_HP 机场兜底。
+ */
+export async function getNaipRoutePoints(routeId: string): Promise<NaipRoutePoints> {
+  if (!isTauri()) throw new Error("班机航路航点解析仅在应用内可用");
+  return invoke<NaipRoutePoints>("get_naip_route_points", { routeId });
+}
+
+export async function getNaipStatus(): Promise<NaipStatus> {
+  if (!isTauri()) {
+    return {
+      root: null, airportFile: null, routeFile: null, pointFile: null, airportCount: 0, routeCount: 0,
+      airportMessage: "浏览器模式不读本地数据包", routeMessage: "浏览器模式不读本地数据包",
+    };
+  }
+  return invoke<NaipStatus>("get_naip_status");
+}
+
 export async function setLocalChartLibrary(path: string): Promise<LocalChartLibraryStatus> {
   if (!isTauri()) throw new Error("本地航图库仅在桌面应用中可用");
   return invoke<LocalChartLibraryStatus>("set_local_chart_library", { path });
@@ -268,7 +358,7 @@ export async function getNavigationDatabaseStatus(): Promise<NavigationDatabaseS
   return invoke<NavigationDatabaseStatus>("get_navigation_database_status");
 }
 
-export async function setNavigationDatabase(source: "lnm" | "fenix", databasePath?: string): Promise<NavigationDatabaseStatus> {
+export async function setNavigationDatabase(source: NavigationDatabaseSource, databasePath?: string): Promise<NavigationDatabaseStatus> {
   if (!isTauri()) throw new Error("导航数据库仅在桌面应用中可用");
   return invoke<NavigationDatabaseStatus>("set_navigation_database", { source, databasePath });
 }
@@ -296,6 +386,26 @@ export async function getNavigationProcedurePoints(procedureId: number, runway?:
 export async function getNavigationRunwayThreshold(icao: string, runway: string): Promise<FlightRoutePoint | null> {
   if (!isTauri()) return null;
   return invoke<FlightRoutePoint | null>("get_navigation_runway_threshold", { icao, runway });
+}
+
+/** 跑道一端（DFD v2 的 tbl_pg_runways 每端一行）。 */
+export interface NavigationRunwayEnd {
+  ident: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** 程序对应跑道的两端；对端缺坐标时 reciprocal 为 null，前端只标阈值。 */
+export interface NavigationRunwayEnds {
+  runway: string;
+  primary: NavigationRunwayEnd;
+  reciprocal: NavigationRunwayEnd | null;
+}
+
+/** 画出程序跑道 + 自动框选用的两端坐标。 */
+export async function getNavigationRunwayEnds(icao: string, runway: string): Promise<NavigationRunwayEnds | null> {
+  if (!isTauri()) return null;
+  return invoke<NavigationRunwayEnds | null>("get_navigation_runway_ends", { icao, runway });
 }
 
 export async function getNavigationMapData(viewport: MapViewport): Promise<NavigationMapData> {

@@ -154,8 +154,10 @@ function asFeature(element: OverpassElement): AirportGroundFeatureCollection["fe
 export async function loadOsmAirportGround(bounds: AirportGroundBounds, signal?: AbortSignal): Promise<AirportGroundFeatureCollection> {
   const normalizedBounds = normalizeAirportGroundBounds(bounds);
   const bbox = `${normalizedBounds.south},${normalizedBounds.west},${normalizedBounds.north},${normalizedBounds.east}`;
-  const query = `[out:json][timeout:18];(way["aeroway"="runway"](${bbox});way["aeroway"="taxiway"](${bbox});way["aeroway"="taxilane"](${bbox});way["aeroway"="apron"](${bbox});way["aeroway"="terminal"](${bbox});way["building"="terminal"](${bbox});node["aeroway"="parking_position"](${bbox});node["aeroway"="gate"](${bbox}););out tags geom;`;
-  const cacheKey = `osm-airport-ground-v6:${bbox}`;
+  // 机位点（parking_position / gate）不在这里取：停机位统一由 XFS 的
+  // `/pilot/api/efb/gates/{icao}` 提供，两边一起取会在停机坪上叠出双份标签。
+  const query = `[out:json][timeout:18];(way["aeroway"="runway"](${bbox});way["aeroway"="taxiway"](${bbox});way["aeroway"="taxilane"](${bbox});way["aeroway"="apron"](${bbox});way["aeroway"="terminal"](${bbox});way["building"="terminal"](${bbox}););out tags geom;`;
+  const cacheKey = `osm-airport-ground-v7:${bbox}`;
   const result = await loadCachedResource({
     cacheKey,
     ttlMs: 24 * 60 * 60_000,

@@ -53,17 +53,38 @@ pub struct FlightProcedureSelection {
     pub points: Vec<FlightRoutePoint>,
 }
 
-fn data_directory() -> Result<PathBuf, String> {
-    let directory = std::env::var("APPDATA")
-        .map(PathBuf::from)
-        .map_err(|_| "无法找到 Windows AppData 目录".to_string())?
-        .join("SkyBoard EFB");
+/// 飞行计划库目录：统一走 Tauri 的 app_local_data_dir（Windows / Android / iOS 一致），
+/// 不再读 Windows 专属的 APPDATA 环境变量——那在移动端直接报错。
+fn data_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let directory = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?;
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     Ok(directory)
 }
 
-fn connection() -> Result<Connection, String> {
-    let database = data_directory()?.join("skyboard.db");
+/// 旧版桌面包把库放在 %APPDATA%/SkyBoard EFB；换到 app_local_data_dir 后
+/// 首次打开时把旧库搬过来，避免用户飞行计划"消失"。
+fn migrate_legacy_database(target: &std::path::Path) {
+    if target.exists() {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let legacy = PathBuf::from(appdata)
+            .join("SkyBoard EFB")
+            .join("skyboard.db");
+        if legacy.is_file() {
+            let _ = fs::copy(legacy, target);
+        }
+    }
+}
+
+fn connection(app: &tauri::AppHandle) -> Result<Connection, String> {
+    let database = data_directory(app)?.join("skyboard.db");
+    migrate_legacy_database(&database);
     let connection = Connection::open(database).map_err(|error| error.to_string())?;
     connection.execute_batch("CREATE TABLE IF NOT EXISTS flight_plans (id TEXT PRIMARY KEY, callsign TEXT NOT NULL, departure TEXT NOT NULL, arrival TEXT NOT NULL, alternate TEXT, route TEXT NOT NULL, aircraft TEXT NOT NULL, cruise_altitude TEXT NOT NULL, etd TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, imported_at TEXT NOT NULL DEFAULT '', route_points TEXT NOT NULL DEFAULT '[]', departure_runway TEXT, arrival_runway TEXT, sid TEXT, star TEXT);").map_err(|error| error.to_string())?;
     let has_imported_at = {
@@ -142,8 +163,8 @@ fn connection() -> Result<Connection, String> {
 }
 
 #[tauri::command]
-pub fn list_flight_plans() -> Result<Vec<FlightPlan>, String> {
-    let connection = connection()?;
+pub fn list_flight_plans(app: tauri::AppHandle) -> Result<Vec<FlightPlan>, String> {
+    let connection = connection(&app)?;
     let mut statement = connection.prepare("SELECT id, callsign, departure, arrival, alternate, route, aircraft, cruise_altitude, etd, updated_at, imported_at, route_points, departure_runway, arrival_runway, sid, star, approach FROM flight_plans ORDER BY imported_at DESC, updated_at DESC").map_err(|error| error.to_string())?;
     let plans = statement
         .query_map([], |row| {
@@ -188,8 +209,8 @@ pub fn list_flight_plans() -> Result<Vec<FlightPlan>, String> {
 }
 
 #[tauri::command]
-pub fn save_flight_plan(plan: FlightPlan) -> Result<FlightPlan, String> {
-    let connection = connection()?;
+pub fn save_flight_plan(app: tauri::AppHandle, plan: FlightPlan) -> Result<FlightPlan, String> {
+    let connection = connection(&app)?;
     let route_points =
         serde_json::to_string(&plan.route_points).map_err(|error| error.to_string())?;
     let sid = plan

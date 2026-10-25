@@ -1,0 +1,186 @@
+# 应用自身命令的权限清单（脚本生成，改动请同步 lib.rs 的 generate_handler）。
+#
+# Tauri 2 一旦发现 app 级权限清单，就会对所有非插件命令做 ACL 校验：
+# 这里没列出的命令会被直接拒绝，报「xxx not allowed. Plugin not found」。
+# 页面来源从 localhost 换成 127.0.0.1（或反过来）也会走这套校验，
+# 所以能力文件里除 local 之外，还给本地开发服务器的两个来源开了 remote。
+
+[[permission]]
+identifier = "allow-api-proxy"
+description = "允许前端调用 api_proxy"
+commands.allow = ["api_proxy"]
+
+[[permission]]
+identifier = "allow-jepp-get"
+description = "允许前端调用 jepp_get"
+commands.allow = ["jepp_get"]
+
+[[permission]]
+identifier = "allow-jepp-chart-pdf"
+description = "允许前端调用 jepp_chart_pdf"
+commands.allow = ["jepp_chart_pdf"]
+
+[[permission]]
+identifier = "allow-list-flight-plans"
+description = "允许前端调用 list_flight_plans"
+commands.allow = ["list_flight_plans"]
+
+[[permission]]
+identifier = "allow-save-flight-plan"
+description = "允许前端调用 save_flight_plan"
+commands.allow = ["save_flight_plan"]
+
+[[permission]]
+identifier = "allow-get-weather"
+description = "允许前端调用 get_weather"
+commands.allow = ["get_weather"]
+
+[[permission]]
+identifier = "allow-get-notams"
+description = "允许前端调用 get_notams"
+commands.allow = ["get_notams"]
+
+[[permission]]
+identifier = "allow-get-osm-airport-ground"
+description = "允许前端调用 get_osm_airport_ground"
+commands.allow = ["get_osm_airport_ground"]
+
+[[permission]]
+identifier = "allow-clear-chart-cache"
+description = "允许前端调用 clear_chart_cache"
+commands.allow = ["clear_chart_cache"]
+
+[[permission]]
+identifier = "allow-cache-chart-pdf"
+description = "允许前端调用 cache_chart_pdf"
+commands.allow = ["cache_chart_pdf"]
+
+[[permission]]
+identifier = "allow-get-current-airac-cycle"
+description = "允许前端调用 get_current_airac_cycle"
+commands.allow = ["get_current_airac_cycle"]
+
+[[permission]]
+identifier = "allow-import-simbrief-flight"
+description = "允许前端调用 import_simbrief_flight"
+commands.allow = ["import_simbrief_flight"]
+
+[[permission]]
+identifier = "allow-list-chartfox-charts"
+description = "允许前端调用 list_chartfox_charts"
+commands.allow = ["list_chartfox_charts"]
+
+[[permission]]
+identifier = "allow-open-chartfox-chart"
+description = "允许前端调用 open_chartfox_chart"
+commands.allow = ["open_chartfox_chart"]
+
+[[permission]]
+identifier = "allow-get-navigation-database-status"
+description = "允许前端调用 get_navigation_database_status"
+commands.allow = ["get_navigation_database_status"]
+
+[[permission]]
+identifier = "allow-set-navigation-database"
+description = "允许前端调用 set_navigation_database"
+commands.allow = ["set_navigation_database"]
+
+[[permission]]
+identifier = "allow-search-navigation-airports"
+description = "允许前端调用 search_navigation_airports"
+commands.allow = ["search_navigation_airports"]
+
+[[permission]]
+identifier = "allow-get-navigation-airport-details"
+description = "允许前端调用 get_navigation_airport_details"
+commands.allow = ["get_navigation_airport_details"]
+
+[[permission]]
+identifier = "allow-get-navigation-airport-procedures"
+description = "允许前端调用 get_navigation_airport_procedures"
+commands.allow = ["get_navigation_airport_procedures"]
+
+[[permission]]
+identifier = "allow-get-navigation-procedure-points"
+description = "允许前端调用 get_navigation_procedure_points"
+commands.allow = ["get_navigation_procedure_points"]
+
+[[permission]]
+identifier = "allow-get-navigation-runway-threshold"
+description = "允许前端调用 get_navigation_runway_threshold"
+commands.allow = ["get_navigation_runway_threshold"]
+
+[[permission]]
+identifier = "allow-get-navigation-runway-ends"
+description = "允许前端调用 get_navigation_runway_ends"
+commands.allow = ["get_navigation_runway_ends"]
+
+[[permission]]
+identifier = "allow-get-navigation-map-data"
+description = "允许前端调用 get_navigation_map_data"
+commands.allow = ["get_navigation_map_data"]
+
+[[permission]]
+identifier = "allow-get-local-chart-library-status"
+description = "允许前端调用 get_local_chart_library_status"
+commands.allow = ["get_local_chart_library_status"]
+
+[[permission]]
+identifier = "allow-set-local-chart-library"
+description = "允许前端调用 set_local_chart_library"
+commands.allow = ["set_local_chart_library"]
+
+[[permission]]
+identifier = "allow-list-local-charts"
+description = "允许前端调用 list_local_charts"
+commands.allow = ["list_local_charts"]
+
+[[permission]]
+identifier = "allow-open-local-chart"
+description = "允许前端调用 open_local_chart"
+commands.allow = ["open_local_chart"]
+
+[[permission]]
+identifier = "allow-get-xfly-airport-data"
+description = "允许前端调用 get_xfly_airport_data"
+commands.allow = ["get_xfly_airport_data"]
+
+[[permission]]
+identifier = "allow-get-xfly-chart-thumbnail"
+description = "允许前端调用 get_xfly_chart_thumbnail"
+commands.allow = ["get_xfly_chart_thumbnail"]
+
+[[permission]]
+identifier = "allow-get-xfly-chart-image"
+description = "允许前端调用 get_xfly_chart_image"
+commands.allow = ["get_xfly_chart_image"]
+
+[[permission]]
+identifier = "allow-list-navigraph-charts"
+description = "允许前端调用 list_navigraph_charts"
+commands.allow = ["list_navigraph_charts"]
+
+[[permission]]
+identifier = "allow-get-local-airports"
+description = "允许前端调用 get_local_airports"
+commands.allow = ["get_local_airports"]
+
+[[permission]]
+identifier = "allow-search-flight-routes"
+description = "允许前端调用 search_flight_routes"
+commands.allow = ["search_flight_routes"]
+
+[[permission]]
+identifier = "allow-get-naip-status"
+description = "允许前端调用 get_naip_status"
+commands.allow = ["get_naip_status"]
+
+[[permission]]
+identifier = "allow-get-naip-route-points"
+description = "允许前端调用 get_naip_route_points"
+commands.allow = ["get_naip_route_points"]
+
+[[set]]
+identifier = "app-core"
+description = "SkyBoard EFB 自身命令：本地来源与开发服务器来源均可调用"
+permissions = ["allow-api-proxy", "allow-jepp-get", "allow-jepp-chart-pdf", "allow-list-flight-plans", "allow-save-flight-plan", "allow-get-weather", "allow-get-notams", "allow-get-osm-airport-ground", "allow-clear-chart-cache", "allow-cache-chart-pdf", "allow-get-current-airac-cycle", "allow-import-simbrief-flight", "allow-list-chartfox-charts", "allow-open-chartfox-chart", "allow-get-navigation-database-status", "allow-set-navigation-database", "allow-search-navigation-airports", "allow-get-navigation-airport-details", "allow-get-navigation-airport-procedures", "allow-get-navigation-procedure-points", "allow-get-navigation-runway-threshold", "allow-get-navigation-runway-ends", "allow-get-navigation-map-data", "allow-get-local-chart-library-status", "allow-set-local-chart-library", "allow-list-local-charts", "allow-open-local-chart", "allow-get-xfly-airport-data", "allow-get-xfly-chart-thumbnail", "allow-get-xfly-chart-image", "allow-list-navigraph-charts", "allow-get-local-airports", "allow-search-flight-routes", "allow-get-naip-status", "allow-get-naip-route-points"]

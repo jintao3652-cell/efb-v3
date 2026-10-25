@@ -76,7 +76,7 @@ fn cache_path(app: &AppHandle, station: &str) -> Result<PathBuf, String> {
 fn read_cached_weather(app: &AppHandle, station: &str) -> Option<WeatherReport> {
     let path = cache_path(app, station).ok()?;
     let mut report = serde_json::from_slice::<WeatherReport>(&fs::read(path).ok()?).ok()?;
-    report.source = "缓存".to_string();
+    report.source = "caac 航空气象 · 本机缓存".to_string();
     Some(report)
 }
 
@@ -178,7 +178,7 @@ async fn nmc_weather_report(
             format!("{qnh} hPa")
         },
         observed_at: available(metar.get("time")),
-        source: "中国气象局航空气象".to_string(),
+        source: "caac 航空气象".to_string(),
         taf,
         preview_url: None,
     })
@@ -245,7 +245,7 @@ async fn openweather_report(
         temperature,
         qnh: pressure,
         observed_at: "实时".to_string(),
-        source: "OpenWeather".to_string(),
+        source: "caac 航空气象 · OpenWeather".to_string(),
         taf: "OpenWeather 不提供航空例行天气预报。".to_string(),
         preview_url: None,
     })
@@ -316,7 +316,7 @@ async fn awc_weather_report(
             .and_then(Value::as_str)
             .unwrap_or("实时")
             .to_string(),
-        source: "实时".to_string(),
+        source: "caac 航空气象 · faa".to_string(),
         taf,
         preview_url: Some(format!(
             "https://metar-taf.com/site/preview-airport?id={station}&nightmode=false"

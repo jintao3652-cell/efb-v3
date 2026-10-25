@@ -3,5 +3,18 @@
   "identifier": "default",
   "description": "Desktop application permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "local": true,
+  "remote": {
+    "urls": [
+      "http://localhost:1420",
+      "http://localhost:1420/*",
+      "http://127.0.0.1:1420",
+      "http://127.0.0.1:1420/*",
+      "http://localhost:4173",
+      "http://localhost:4173/*",
+      "http://127.0.0.1:4173",
+      "http://127.0.0.1:4173/*"
+    ]
+  },
+  "permissions": ["core:default", "dialog:default", "app-core"]
 }

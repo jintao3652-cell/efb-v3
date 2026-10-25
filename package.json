@@ -8,6 +8,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "android": "tauri android dev",
+    "android:build": "tauri android build --apk",
+    "android:build:aab": "tauri android build --aab",
+    "ios": "tauri ios dev",
+    "ios:build": "tauri ios build",
     "check": "tsc -b --pretty false"
   },
   "dependencies": {

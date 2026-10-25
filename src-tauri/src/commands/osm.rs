@@ -34,8 +34,9 @@ pub async fn get_osm_airport_ground(
 ) -> Result<Value, String> {
     validate_bounds(west, south, east, north)?;
     let bbox = format!("{south:.3},{west:.3},{north:.3},{east:.3}");
+    // 机位点交给 XFS 的 gates 接口，避免与地图上的机位图层重复。
     let query = format!(
-        "[out:json][timeout:18];(way[\"aeroway\"=\"runway\"]({bbox});way[\"aeroway\"=\"taxiway\"]({bbox});way[\"aeroway\"=\"taxilane\"]({bbox});way[\"aeroway\"=\"apron\"]({bbox});way[\"aeroway\"=\"terminal\"]({bbox});way[\"building\"=\"terminal\"]({bbox});node[\"aeroway\"=\"parking_position\"]({bbox});node[\"aeroway\"=\"gate\"]({bbox}););out tags geom;"
+        "[out:json][timeout:18];(way[\"aeroway\"=\"runway\"]({bbox});way[\"aeroway\"=\"taxiway\"]({bbox});way[\"aeroway\"=\"taxilane\"]({bbox});way[\"aeroway\"=\"apron\"]({bbox});way[\"aeroway\"=\"terminal\"]({bbox});way[\"building\"=\"terminal\"]({bbox}););out tags geom;"
     );
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(24))

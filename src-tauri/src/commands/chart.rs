@@ -13,16 +13,16 @@ use zip::ZipArchive;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum LocalChartSourceType {
+pub(crate) enum LocalChartSourceType {
     Folder,
     Zip,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalChartLibraryConfig {
-    path: String,
-    source_type: LocalChartSourceType,
+pub(crate) struct LocalChartLibraryConfig {
+    pub(crate) path: String,
+    pub(crate) source_type: LocalChartSourceType,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,6 +44,12 @@ pub struct LocalChart {
     pub title: String,
     pub category: String,
     pub revision: String,
+    /// Charts.csv 的 `ChartName`（人读名称，如「机场图」「RWY03」）。
+    #[serde(default)]
+    pub name: String,
+    /// Charts.csv 的 `ChartTypeEx_CH`（图种原文，如「标准仪表进场图」）。
+    #[serde(default)]
+    pub chart_type: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -78,7 +84,7 @@ struct LocalChartIndex {
     charts: Vec<LocalChart>,
 }
 
-const INDEX_VERSION: u32 = 2;
+const INDEX_VERSION: u32 = 4;
 
 static LOCAL_CHART_INDEX: OnceLock<Mutex<Option<LocalChartIndex>>> = OnceLock::new();
 
@@ -109,7 +115,7 @@ fn library_index_path() -> Result<PathBuf, String> {
     Ok(app_directory()?.join("local-chart-index.json"))
 }
 
-fn read_library_config() -> Result<Option<LocalChartLibraryConfig>, String> {
+pub(crate) fn read_library_config() -> Result<Option<LocalChartLibraryConfig>, String> {
     let path = library_config_path()?;
     if !path.exists() {
         return Ok(None);
@@ -195,6 +201,34 @@ fn airport_icao(value: &str) -> Option<String> {
             .chars()
             .all(|character| character.is_ascii_alphabetic()))
     .then_some(value)
+}
+
+/// 文件夹看起来就是航图根目录：直接躺着两个以上以 ICAO 命名的子目录。
+fn looks_like_terminal(path: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    let mut count = 0;
+    for entry in entries.flatten() {
+        if entry.path().is_dir() && airport_icao(&entry.file_name().to_string_lossy()).is_some() {
+            count += 1;
+            if count >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// 解析出真正的航图根目录：`<x>/Terminal`、`<x>/Terminals`，或用户直接选的航图根目录本身。
+fn resolve_terminal_root(path: &Path) -> Result<PathBuf, String> {
+    if let Some(directory) = terminal_directory(path) {
+        return Ok(directory);
+    }
+    if looks_like_terminal(path) {
+        return Ok(path.to_path_buf());
+    }
+    Err("所选的文件夹里没有 Terminal/Terminals 目录，也没有按 ICAO 命名的机场子文件夹".to_string())
 }
 
 fn chart_category(name: &str) -> String {
@@ -397,6 +431,8 @@ fn local_chart(
             } else {
                 revision
             },
+            name: item.title.clone(),
+            chart_type: item.chart_type.clone(),
         };
     }
     let title = chart_title(path.to_string_lossy().as_ref());
@@ -404,9 +440,52 @@ fn local_chart(
         id,
         airport,
         category: chart_category(&title),
-        title,
         revision: fallback_revision.to_string(),
+        name: title.clone(),
+        chart_type: String::new(),
+        title,
     }
+}
+
+/// 图种在列表里的先后：机场图 → 离场 → 进场 → 航路，与阅读习惯一致。
+fn category_rank(category: &str) -> u8 {
+    match category {
+        "机场" => 0,
+        "离场" => 1,
+        "进场" => 2,
+        "航路" => 3,
+        _ => 4,
+    }
+}
+
+/// 图号排序键：先按字母段分组（0C / 0G / 0P 各成一组），组内再按数字。
+/// 这样「0G-1、0G-2、0P-1」不会交错成「0G-1、0P-1、0G-2」。
+fn page_sort_key(revision: &str) -> (String, u32, String) {
+    let letters = revision
+        .chars()
+        .filter(char::is_ascii_alphabetic)
+        .flat_map(char::to_uppercase)
+        .collect::<String>();
+    let digits = revision
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>();
+    (
+        letters,
+        digits.parse::<u32>().unwrap_or(u32::MAX),
+        revision.to_string(),
+    )
+}
+
+fn sort_local_charts(charts: &mut [LocalChart]) {
+    charts.sort_by(|first, second| {
+        first
+            .airport
+            .cmp(&second.airport)
+            .then(category_rank(&first.category).cmp(&category_rank(&second.category)))
+            .then(page_sort_key(&first.revision).cmp(&page_sort_key(&second.revision)))
+            .then(first.title.cmp(&second.title))
+    });
 }
 
 fn folder_charts(terminals: &Path) -> Result<Vec<LocalChart>, String> {
@@ -447,12 +526,7 @@ fn folder_charts(terminals: &Path) -> Result<Vec<LocalChart>, String> {
             }
         }
     }
-    charts.sort_by(|first, second| {
-        first
-            .airport
-            .cmp(&second.airport)
-            .then(first.title.cmp(&second.title))
-    });
+    sort_local_charts(&mut charts);
     Ok(charts)
 }
 
@@ -519,21 +593,14 @@ fn zip_charts(path: &Path) -> Result<Vec<LocalChart>, String> {
             ));
         }
     }
-    charts.sort_by(|first, second| {
-        first
-            .airport
-            .cmp(&second.airport)
-            .then(first.title.cmp(&second.title))
-    });
+    sort_local_charts(&mut charts);
     Ok(charts)
 }
 
 fn library_charts(config: &LocalChartLibraryConfig) -> Result<Vec<LocalChart>, String> {
     match config.source_type {
         LocalChartSourceType::Folder => {
-            let root = PathBuf::from(&config.path);
-            let terminals = terminal_directory(&root)
-                .ok_or_else(|| "所选文件夹中未找到 Terminal 或 Terminals 文件夹".to_string())?;
+            let terminals = resolve_terminal_root(Path::new(&config.path))?;
             folder_charts(&terminals)
         }
         LocalChartSourceType::Zip => zip_charts(Path::new(&config.path)),
@@ -613,6 +680,7 @@ pub fn clear_chart_cache(app: AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     for name in [
         "chart-cache",
+        "jepp-chart-cache",
         "chart-thumbnails",
         "chart-images",
         "chartfox-chart-cache",
@@ -707,8 +775,7 @@ pub fn open_local_chart(app: AppHandle, chart_id: String) -> Result<String, Stri
     }
     match config.source_type {
         LocalChartSourceType::Folder => {
-            let terminals = terminal_directory(Path::new(&config.path))
-                .ok_or_else(|| "未找到 Terminal 或 Terminals 文件夹".to_string())?
+            let terminals = resolve_terminal_root(Path::new(&config.path))?
                 .canonicalize()
                 .map_err(|error| error.to_string())?;
             let source = terminals

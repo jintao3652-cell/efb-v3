@@ -1,455 +1,604 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
-import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Archive, ArrowLeft, BookOpen, Building2, ChevronLeft, ChevronRight, Download, ExternalLink, FilePlus2, FileText, FolderOpen, Minus, PenLine, Plus, RefreshCw, RotateCw, Search, Trash2 } from "lucide-react";
-import { cacheChartPdf, getLocalChartLibraryStatus, getXflyChartImage, isTauri, listChartFoxCharts, listLocalCharts, listNavigraphCharts, openChartFoxChart, openLocalChart, setLocalChartLibrary, type NavigraphChart } from "../lib/tauri";
-import type { Chart } from "../types";
-import { StatusBadge } from "../components/common/StatusBadge";
+import {
+  BookOpen, ChevronLeft, ChevronRight, Compass, FileText, Grid2x2, Layers, Minus, Pin, Plus, RotateCcw,
+  Search, Settings2, X,
+} from "lucide-react";
+import { getLocalChartLibraryStatus, isTauri, listLocalCharts, openLocalChart, type LocalChart } from "../lib/tauri";
+import { loadAdHpAirports } from "../lib/airport-data";
+import { airports as fallbackAirports } from "../lib/data";
+import { chartRunways, groupComms, jeppAirportOverview, jeppChartFile, jeppCharts, jeppSidStar, prefetchChartFile, releaseChartFile, type JeppChart } from "../lib/jepp";
+import { getAirport, getFrequencies, getRunways, surfaceLabel } from "../lib/xfly";
+import { useAppStore } from "../stores/app-store";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
-type PdfSource = File | string;
-type ChartSource = "local" | "navigraph" | "chartfox";
-type NavigraphCategory = "STAR" | "APP" | "TAXI" | "SID" | "REF";
-type InkPoint = { x: number; y: number };
-type InkStroke = { points: InkPoint[]; color: string; width: number };
-type AirportChartGroup = { airport: string; charts: Chart[] };
+const PAGE_SIZE = 40;
 
-function categoryForChartFox(type: string): Chart["category"] {
-  if (/arrival|approach|star|iac/i.test(type)) return "进场";
-  if (/departure|sid/i.test(type)) return "离场";
-  if (/enroute|route/i.test(type)) return "航路";
+type ChartKind = "机场" | "离场" | "进场" | "进近";
+
+/** 图种筛选的顺序；本地数据把进近并入进场，所以少一档。 */
+const KIND_CHIPS: Record<"jepp" | "local", ReadonlyArray<ChartKind | "全部">> = {
+  jepp: ["全部", "机场", "离场", "进场", "进近"],
+  local: ["全部", "机场", "离场", "进场"],
+};
+
+function chartKind(category: string): ChartKind {
+  const value = category.trim().toUpperCase();
+  if (value === "DEPARTURE") return "离场";
+  if (value === "ARRIVAL") return "进场";
+  if (value === "APPROACH") return "进近";
   return "机场";
 }
 
-function categoryForNavigraph(chart: NavigraphChart): NavigraphCategory {
-  const category = chart.category.trim().toUpperCase();
-  if (category === "ARR") return "STAR";
-  if (category === "APP") return "APP";
-  if (category === "DEP") return "SID";
-  if (category === "APT" && /airport|parking|stands?|taxi|apron|ground|hot\s*spots?/i.test(chart.name)) return "TAXI";
-  return "REF";
+function dateLabel(value: string) {
+  if (!value) return "—";
+  return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : value;
 }
 
-function localCategoryForNavigraph(category: NavigraphCategory): Chart["category"] {
-  if (category === "STAR" || category === "APP") return "进场";
-  if (category === "SID") return "离场";
-  return "机场";
+/** J3N 周期是 YYYYMMDD，拼成 AIRAC 编号（2026 + 10 → 2610）。 */
+function cycleLabel(cycle: { datacycle: string; datacycleyear?: string } | null | undefined) {
+  if (!cycle?.datacycle) return "—";
+  return `${cycle.datacycleyear ? cycle.datacycleyear.slice(-2) : ""}${cycle.datacycle}`;
 }
 
-function navigraphRevision(value: string) {
-  return /^(\d{4})(\d{2})(\d{2})$/.test(value) ? value.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3") : value || "未知";
+function compactDate(value?: string) {
+  if (!value) return "—";
+  return /^\d{8}$/.test(value) ? `${value.slice(4, 6)}-${value.slice(6, 8)}` : value;
 }
 
-function airportChartSummary(chartsForAirport: Chart[]) {
-  const counts = new Map<Chart["category"], number>();
-  for (const chart of chartsForAirport) counts.set(chart.category, (counts.get(chart.category) ?? 0) + 1);
-  return (["机场", "进场", "离场", "航路"] as const).filter((category) => counts.has(category)).map((category) => `${category} ${counts.get(category)}`).join(" · ");
+function formatMhz(value: number) {
+  return Number(value).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }
+
+/** J3N 通讯类型码的中文 / 缩写对照。 */
+const commLabels: Record<string, string> = {
+  ATIS: "ATIS 通播",
+  放行: "放行 CLD",
+  地面: "地面 GND",
+  塔台: "塔台 TWR",
+  "进近/离场": "进近 / 离场 APP",
+  机坪: "机坪 APR",
+  UNICOM: "UNICOM",
+};
 
 export function ChartsPage() {
-  const client = useQueryClient();
-  const [searchParams] = useSearchParams();
-  const requestedIcao = (searchParams.get("icao") ?? "").trim().toUpperCase();
-  const appliedRequestedIcao = useRef("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialIcao = (searchParams.get("icao") ?? "ZBAA").toUpperCase();
+  const [icao, setIcao] = useState(initialIcao);
+  const [airportPicker, setAirportPicker] = useState(false);
+  const [airportQuery, setAirportQuery] = useState("");
+  const [tab, setTab] = useState<"charts" | "info" | "procedures">("charts");
+  const [procKind, setProcKind] = useState<"sid" | "star">("sid");
+  const [procName, setProcName] = useState<string | null>(null);
+  const [kind, setKind] = useState<ChartKind | "全部">("全部");
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<"全部" | Chart["category"]>("全部");
-  const [source, setSource] = useState<ChartSource>("local");
-  const [selectedAirport, setSelectedAirport] = useState("");
-  const [navigraphIcao, setNavigraphIcao] = useState(/^[A-Z0-9]{4}$/.test(requestedIcao) ? requestedIcao : "ZBAA");
-  const [navigraphCategory, setNavigraphCategory] = useState<NavigraphCategory>("STAR");
-  const [chartFoxIcao, setChartFoxIcao] = useState(/^[A-Z0-9]{4}$/.test(requestedIcao) ? requestedIcao : "ZBAA");
-  const [selected, setSelected] = useState<Chart | null>(null);
-  const [externalChartUrl, setExternalChartUrl] = useState("");
-  const [pdfSource, setPdfSource] = useState<PdfSource | null>(null);
-  const [imageSource, setImageSource] = useState("");
-  const [imageLoading, setImageLoading] = useState(false);
-  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
-  const [fileName, setFileName] = useState("");
-  const [pageCount, setPageCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<JeppChart | null>(null);
+  const [localSelected, setLocalSelected] = useState<LocalChart | null>(null);
+  const source = useAppStore((state) => state.chartSource);
+  const setSource = useAppStore((state) => state.setChartSource);
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+  const [pageCount, setPageCount] = useState(1);
   const [pageNumber, setPageNumber] = useState(1);
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);
-  const [drawMode, setDrawMode] = useState(false);
-  const [hasInk, setHasInk] = useState(false);
-  const [viewerWidth, setViewerWidth] = useState(720);
-  const [error, setError] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const viewerRef = useRef<HTMLDivElement>(null);
-  const pageStageRef = useRef<HTMLDivElement>(null);
-  const inkCanvasRef = useRef<HTMLCanvasElement>(null);
-  const inkByPageRef = useRef(new Map<number, InkStroke[]>());
-  const activeStrokeRef = useRef<InkStroke | null>(null);
-  const imageRequestRef = useRef(0);
+  const [zoom, setZoom] = useState(1.1);
+  const [pinned, setPinned] = useState(false);
 
-  const resetPdfTools = () => {
-    setPageCount(0);
-    setPageNumber(1);
-    setZoom(1);
-    setRotation(0);
-    setDrawMode(false);
-    setHasInk(false);
-    inkByPageRef.current.clear();
-    activeStrokeRef.current = null;
-    const context = inkCanvasRef.current?.getContext("2d");
-    if (context && inkCanvasRef.current) context.clearRect(0, 0, inkCanvasRef.current.width, inkCanvasRef.current.height);
-  };
-  const resetPreview = () => {
-    imageRequestRef.current += 1;
-    setPdfSource(null);
-    setImageSource("");
-    setImageLoading(false);
-    setImageSize({ width: 0, height: 0 });
-    setFileName("");
-    setError("");
-    resetPdfTools();
-  };
+  const catalog = useQuery({ queryKey: ["ad-hp-airports"], queryFn: loadAdHpAirports, staleTime: Infinity });
+  const airports = catalog.data ?? fallbackAirports;
+  const airport = airports.find((item) => item.icao === icao);
 
-  const localLibrary = useQuery({ queryKey: ["local-chart-library"], queryFn: getLocalChartLibraryStatus, retry: 0 });
-  const localCharts = useQuery({ queryKey: ["local-charts"], queryFn: listLocalCharts, enabled: source === "local" && localLibrary.data?.ready, retry: 0 });
-  const navigraph = useQuery({ queryKey: ["navigraph-charts", navigraphIcao], queryFn: () => listNavigraphCharts(navigraphIcao), enabled: source === "navigraph" && navigraphIcao.length === 4, retry: 1 });
-  const chartFox = useQuery({ queryKey: ["chartfox", chartFoxIcao], queryFn: () => listChartFoxCharts(chartFoxIcao), enabled: source === "chartfox" && chartFoxIcao.length === 4, retry: 1 });
-  const localLibraryMutation = useMutation({
-    mutationFn: setLocalChartLibrary,
-    onSuccess: () => {
-      client.invalidateQueries({ queryKey: ["local-chart-library"] });
-      client.invalidateQueries({ queryKey: ["local-charts"] });
-      setSelectedAirport("");
-      setQuery("");
-      setCategory("全部");
-      resetPreview();
-    },
+  const jepp = useQuery({
+    queryKey: ["jepp-charts", icao],
+    // geo=1 只回已缓存的地理范围，不会触发引擎探测；拿到就能标注「可定位」。
+    queryFn: () => jeppCharts(icao, true),
+    enabled: icao.length === 4,
+    staleTime: 30 * 60_000,
+    retry: 0,
   });
 
-  const activeCharts = useMemo<Chart[]>(() => localLibrary.data?.ready ? (localCharts.data ?? []).map((chart) => ({ id: chart.id, airport: chart.airport, category: chart.category, title: chart.title, revision: chart.revision, cached: true })) : [], [localCharts.data, localLibrary.data?.ready]);
-  const airportGroups = useMemo<AirportChartGroup[]>(() => {
-    const groups = new Map<string, Chart[]>();
-    for (const chart of activeCharts) groups.set(chart.airport, [...(groups.get(chart.airport) ?? []), chart]);
-    return [...groups.entries()].map(([airport, airportCharts]) => ({ airport, charts: airportCharts })).sort((first, second) => first.airport.localeCompare(second.airport));
-  }, [activeCharts]);
-  const visibleAirportGroups = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return airportGroups;
-    return airportGroups.filter((group) => group.airport.toLowerCase().includes(normalizedQuery) || group.charts.some((chart) => chart.title.toLowerCase().includes(normalizedQuery)));
-  }, [airportGroups, query]);
-  const visibleAirportCharts = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return (airportGroups.find((group) => group.airport === selectedAirport)?.charts ?? []).filter((chart) => (category === "全部" || chart.category === category) && (!normalizedQuery || chart.title.toLowerCase().includes(normalizedQuery)));
-  }, [airportGroups, category, query, selectedAirport]);
-  const visibleNavigraphCharts = useMemo(() => (navigraph.data ?? []).filter((chart) => categoryForNavigraph(chart) === navigraphCategory), [navigraph.data, navigraphCategory]);
+  // 机场总览一次给全跑道 / 频率 / ILS / 周期，比分别打三个端点更省也更一致。
+  const overview = useQuery({
+    queryKey: ["jepp-overview", icao],
+    queryFn: () => jeppAirportOverview(icao),
+    enabled: icao.length === 4 && tab === "info",
+    staleTime: 60 * 60_000,
+    retry: 0,
+  });
+  const procedures = useQuery({
+    queryKey: ["jepp-sidstar", icao],
+    queryFn: () => jeppSidStar(icao),
+    enabled: icao.length === 4 && tab === "procedures",
+    staleTime: 60 * 60_000,
+    retry: 0,
+  });
 
-  useEffect(() => {
-    if (!/^[A-Z0-9]{4}$/.test(requestedIcao) || appliedRequestedIcao.current === requestedIcao) return;
-    if (localLibrary.isFetching || (localLibrary.data?.ready && localCharts.isFetching)) return;
-    setSelected(null);
-    setExternalChartUrl("");
-    setQuery("");
-    setCategory("全部");
-    resetPreview();
-    if (localLibrary.data?.ready && airportGroups.some((group) => group.airport === requestedIcao)) {
-      setSource("local");
-      setSelectedAirport(requestedIcao);
-    } else {
-      setSource("navigraph");
-      setSelectedAirport("");
-      setNavigraphIcao(requestedIcao);
-      setChartFoxIcao(requestedIcao);
-    }
-    appliedRequestedIcao.current = requestedIcao;
-  }, [airportGroups, localCharts.isFetching, localLibrary.data?.ready, localLibrary.isFetching, requestedIcao]);
+  const xflyRunways = useQuery({
+    queryKey: ["xfly-runways", icao],
+    queryFn: () => getRunways(icao),
+    enabled: icao.length === 4 && tab === "info",
+    staleTime: 60 * 60_000,
+    retry: 0,
+  });
+  // JeppQuery 没有该机场时，信息页整体回落到 XFS：机场名 / 标高、跑道、频率。
+  const xflyInfo = useQuery({
+    queryKey: ["xfly-airport-info", icao],
+    queryFn: () => getAirport(icao),
+    enabled: icao.length === 4,
+    staleTime: 30 * 60_000,
+    retry: 0,
+  });
+  const xflyFreqs = useQuery({
+    queryKey: ["xfly-frequencies", icao],
+    queryFn: () => getFrequencies(icao),
+    enabled: icao.length === 4 && tab === "info",
+    staleTime: 60 * 60_000,
+    retry: 0,
+  });
 
-  const redrawInk = useCallback(() => {
-    const canvas = inkCanvasRef.current;
-    const stage = pageStageRef.current;
-    if (!canvas || !stage || stage.clientWidth <= 0 || stage.clientHeight <= 0) return;
-    const ratio = window.devicePixelRatio || 1;
-    const width = stage.clientWidth;
-    const height = stage.clientHeight;
-    const bitmapWidth = Math.max(1, Math.round(width * ratio));
-    const bitmapHeight = Math.max(1, Math.round(height * ratio));
-    if (canvas.width !== bitmapWidth || canvas.height !== bitmapHeight) {
-      canvas.width = bitmapWidth;
-      canvas.height = bitmapHeight;
-    }
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    context.clearRect(0, 0, width, height);
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    for (const stroke of inkByPageRef.current.get(pageNumber) ?? []) {
-      context.strokeStyle = stroke.color;
-      context.fillStyle = stroke.color;
-      context.lineWidth = stroke.width;
-      if (stroke.points.length === 1) {
-        context.beginPath();
-        context.arc(stroke.points[0].x * width, stroke.points[0].y * height, stroke.width / 2, 0, Math.PI * 2);
-        context.fill();
-        continue;
+  // 标题里的机场名：AD_HP（国内）没有时退 XFS 的中文名 / 英文名。
+  const headerName = airport?.name ?? xflyInfo.data?.cnName ?? xflyInfo.data?.enName ?? "";
+
+  const library = useQuery({ queryKey: ["local-chart-library"], queryFn: getLocalChartLibraryStatus, enabled: isTauri(), retry: 0 });
+  const local = useQuery({ queryKey: ["local-charts"], queryFn: listLocalCharts, enabled: isTauri() && Boolean(library.data?.ready), retry: 0 });
+  const localForAirport = useMemo(() => (local.data ?? []).filter((chart) => chart.airport === icao), [local.data, icao]);
+
+  const charts = jepp.data?.charts ?? [];
+  const procedureList = procedures.data?.[procKind] ?? [];
+  const currentProc = procedureList.find((proc) => `${proc.name}-${proc.runway}` === procName) ?? null;
+
+  const filtered = useMemo(() => {
+    const keyword = query.trim().toUpperCase();
+    return charts.filter((chart) => {
+      if (kind !== "全部" && chartKind(chart.category) !== kind) return false;
+      if (!keyword) return true;
+      return `${chart.index_no}${chart.proc_id}${chart.type_name}${chart.category}`.toUpperCase().includes(keyword);
+    });
+  }, [charts, kind, query]);
+
+  // 本地航图的图种来自 Charts.csv 的分类（机场 / 离场 / 进场 / 航路），
+  // 「进近」在本地数据里并入「进场」，筛选时按同一档处理。
+  const localFiltered = useMemo(() => {
+    const keyword = query.trim().toUpperCase();
+    return localForAirport.filter((chart) => {
+      if (kind !== "全部") {
+        const category = chart.category;
+        const matched = category === kind || (kind === "进近" && category === "进场");
+        if (!matched) return false;
       }
-      context.beginPath();
-      stroke.points.forEach((point, index) => {
-        const x = point.x * width;
-        const y = point.y * height;
-        if (index === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
+      if (!keyword) return true;
+      return `${chart.revision}${chart.category}${chart.name ?? ""}${chart.chartType ?? ""}${chart.title}`
+        .toUpperCase()
+        .includes(keyword);
+    });
+  }, [localForAirport, kind, query]);
+
+  const listLength = source === "jepp" ? filtered.length : localFiltered.length;
+  const pageCountTotal = Math.max(1, Math.ceil(listLength / PAGE_SIZE));
+  useEffect(() => { setPage(0); }, [icao, kind, query, source]);
+  useEffect(() => { setProcName(null); }, [icao]);
+  const visible = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  const visibleLocal = localFiltered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+
+  useEffect(() => { setSearchParams(icao ? { icao } : {}, { replace: true }); }, [icao, setSearchParams]);
+
+  // 航图 PDF 要先取回本地（桌面端由 Rust 缓存，浏览器端转 blob），
+  // 取回期间显示加载态，切换航图时释放上一个地址。
+  useEffect(() => {
+    if (!selected) {
+      setPdfUrl("");
+      setPdfError("");
+      setPdfLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let created = "";
+    setPdfUrl("");
+    setPdfError("");
+    setPdfLoading(true);
+    setPageNumber(1);
+    setPageCount(1);
+
+    jeppChartFile(selected.icao || icao, selected.filename)
+      .then((url) => {
+        if (cancelled) {
+          releaseChartFile(url);
+          return;
+        }
+        created = url;
+        setPdfUrl(url);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setPdfError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setPdfLoading(false);
       });
-      context.stroke();
-    }
-  }, [pageNumber]);
 
-  useEffect(() => {
-    if ((!pdfSource && !imageSource) || !viewerRef.current) return;
-    const viewer = viewerRef.current;
-    const updateWidth = () => {
-      const styles = window.getComputedStyle(viewer);
-      const horizontalPadding = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight);
-      setViewerWidth(Math.max(280, Math.floor(viewer.clientWidth - horizontalPadding)));
-    };
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(viewer);
-    window.addEventListener("resize", updateWidth);
     return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", updateWidth);
+      cancelled = true;
+      releaseChartFile(created);
     };
-  }, [imageSource, pdfSource]);
+  }, [selected, icao]);
 
-  useEffect(() => {
-    const stage = pageStageRef.current;
-    if ((!pdfSource && !imageSource) || !stage) return;
-    const observer = new ResizeObserver(redrawInk);
-    observer.observe(stage);
-    const frame = window.requestAnimationFrame(redrawInk);
-    return () => {
-      observer.disconnect();
-      window.cancelAnimationFrame(frame);
-    };
-  }, [imageSource, pdfSource, pageNumber, rotation, viewerWidth, zoom, redrawInk]);
-
-  useEffect(() => {
-    setHasInk((inkByPageRef.current.get(pageNumber)?.length ?? 0) > 0);
-  }, [imageSource, pageNumber, pdfSource]);
-
-  const pointForEvent = (event: ReactPointerEvent<HTMLCanvasElement>): InkPoint => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return { x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)), y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)) };
-  };
-  const startInk = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!drawMode) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const stroke: InkStroke = { points: [pointForEvent(event)], color: "#ef3f4c", width: 2.6 };
-    const pageInk = inkByPageRef.current.get(pageNumber) ?? [];
-    pageInk.push(stroke);
-    inkByPageRef.current.set(pageNumber, pageInk);
-    activeStrokeRef.current = stroke;
-    setHasInk(true);
-    redrawInk();
-  };
-  const continueInk = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!drawMode || !activeStrokeRef.current) return;
-    activeStrokeRef.current.points.push(pointForEvent(event));
-    redrawInk();
-  };
-  const finishInk = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    activeStrokeRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-  const clearInk = () => {
-    inkByPageRef.current.delete(pageNumber);
-    activeStrokeRef.current = null;
-    setHasInk(false);
-    redrawInk();
-  };
-  const rotatePreview = () => {
-    for (const [inkPage, strokes] of inkByPageRef.current.entries()) {
-      inkByPageRef.current.set(inkPage, strokes.map((stroke) => ({ ...stroke, points: stroke.points.map((point) => ({ x: 1 - point.y, y: point.x })) })));
-    }
-    setRotation((current) => (current + 90) % 360);
-  };
-  const changeZoom = (amount: number) => setZoom((current) => Math.min(3, Math.max(0.5, Number((current + amount).toFixed(1)))));
-  const switchSource = (nextSource: ChartSource) => {
-    setSource(nextSource);
+  const openLocal = async (chart: LocalChart) => {
     setSelected(null);
-    setExternalChartUrl("");
-    setQuery("");
-    setCategory("全部");
-    setError("");
-    resetPreview();
-  };
-  const chooseAirport = (airport: string) => {
-    setSelectedAirport(airport);
-    setQuery("");
-    setCategory("全部");
-  };
-  const leaveAirport = () => {
-    setSelectedAirport("");
-    setQuery("");
-    setCategory("全部");
-  };
-  const chooseChart = (chart: Chart) => {
-    resetPreview();
-    setSelected(chart);
-    setExternalChartUrl("");
-  };
-  const chooseChartFox = async (chart: { id: string; title: string; chartType: string; url: string }) => {
-    resetPreview();
-    const requestId = ++imageRequestRef.current;
-    setSelected({ id: `chartfox-${chart.id}`, airport: chartFoxIcao, category: categoryForChartFox(chart.chartType), title: chart.title, revision: "ChartFox", cached: false });
-    setExternalChartUrl(chart.url);
-    setFileName(chart.title);
-    if (!chart.url) {
-      setError("ChartFox 未提供可打开的航图链接");
-      return;
-    }
-    if (!isTauri()) return;
-    setImageLoading(true);
+    setLocalSelected(chart);
+    setPdfError("");
+    setPdfUrl("");
+    setPdfLoading(true);
+    setPageNumber(1);
+    setPageCount(1);
     try {
-      const asset = await openChartFoxChart(chartFoxIcao, chart.id);
-      if (imageRequestRef.current !== requestId) return;
-      if (asset.mediaType === "application/pdf") {
-        setPdfSource(convertFileSrc(asset.path));
-        setFileName(/\.pdf$/i.test(chart.title) ? chart.title : `${chart.title}.pdf`);
-      } else {
-        setImageSource(convertFileSrc(asset.path));
+      const path = await openLocalChart(chart.id);
+      setPdfUrl(convertFileSrc(path));
+    } catch (error) {
+      setPdfError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const filteredAirports = airportQuery.trim()
+    ? airports.filter((item) => `${item.icao}${item.iata}${item.name}${item.city}`.toUpperCase().includes(airportQuery.trim().toUpperCase())).slice(0, 40)
+    : airports.slice(0, 40);
+
+  // JeppQuery 只给道面数字代码，用 XFly 的道面字段翻译成中文。
+  const surfaceByIdent = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of xflyRunways.data ?? []) {
+      map.set(row.leIdent.toUpperCase(), surfaceLabel(row.surface));
+      map.set(row.heIdent.toUpperCase(), surfaceLabel(row.surface));
+    }
+    return map;
+  }, [xflyRunways.data]);
+
+  // 图种计数跟随来源：Jepp 按分类码，本地按 Charts.csv 的分类。
+  const kindCounts = useMemo(() => {
+    const counts: Record<string, number> = { 全部: source === "jepp" ? charts.length : localForAirport.length };
+    if (source === "jepp") {
+      for (const chart of charts) {
+        const label = chartKind(chart.category);
+        counts[label] = (counts[label] ?? 0) + 1;
       }
-    } catch (reason) {
-      if (imageRequestRef.current === requestId) setError(reason instanceof Error ? reason.message : "无法打开 ChartFox 航图");
-    } finally {
-      if (imageRequestRef.current === requestId) setImageLoading(false);
+    } else {
+      for (const chart of localForAirport) {
+        counts[chart.category] = (counts[chart.category] ?? 0) + 1;
+      }
+      // 本地数据把进近并入进场，这里不单列「进近」。
+      counts["进近"] = 0;
     }
-  };
-  const chooseNavigraphChart = async (chart: NavigraphChart) => {
-    resetPreview();
-    const chartCategory = categoryForNavigraph(chart);
-    const sourceUrls = [chart.imageDayUrl, chart.imageNightUrl, chart.thumbDayUrl, chart.thumbNightUrl].filter(Boolean);
-    const requestId = ++imageRequestRef.current;
-    setSelected({ id: `navigraph-${chart.id}`, airport: navigraphIcao, category: localCategoryForNavigraph(chartCategory), title: `${chart.indexNumber} · ${chart.name}`, revision: navigraphRevision(chart.revisionDate), cached: false });
-    setExternalChartUrl(sourceUrls[0] ?? "");
-    setFileName(`${chart.indexNumber} · ${chart.name}`);
-    setImageLoading(true);
-    try {
-      const imageUrl = isTauri() ? convertFileSrc(await getXflyChartImage(chart.id, chart.revisionDate, sourceUrls)) : sourceUrls[0];
-      if (!imageUrl) throw new Error("此航图没有可用图片");
-      if (imageRequestRef.current === requestId) setImageSource(imageUrl);
-    } catch (reason) {
-      if (imageRequestRef.current === requestId) setError(reason instanceof Error ? reason.message : "无法打开 NAVIGRAPH 航图");
-    } finally {
-      if (imageRequestRef.current === requestId) setImageLoading(false);
-    }
-  };
-  const loadPdf = (file: File) => {
-    imageRequestRef.current += 1;
-    setImageSource("");
-    setImageLoading(false);
-    setImageSize({ width: 0, height: 0 });
-    setPdfSource(file);
-    setFileName(file.name);
-    setError("");
-    resetPdfTools();
-  };
-  const chooseLibrary = async (sourceType: "folder" | "zip") => {
-    if (!isTauri()) {
-      setError("浏览器模式不支持本地航图库。");
-      return;
-    }
-    const path = await open(sourceType === "folder" ? { multiple: false, directory: true } : { multiple: false, directory: false, filters: [{ name: "ZIP 航图库", extensions: ["zip"] }] });
-    if (path && !Array.isArray(path)) localLibraryMutation.mutate(path);
-  };
-  const chooseLocalChart = async (chart: Chart) => {
-    chooseChart(chart);
-    try {
-      const cachedPath = await openLocalChart(chart.id);
-      setPdfSource(convertFileSrc(cachedPath));
-      setFileName(/\.pdf$/i.test(chart.title) ? chart.title : `${chart.title}.pdf`);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "无法打开本地航图");
-    }
-  };
-  const importPdf = async () => {
-    if (!isTauri()) {
-      inputRef.current?.click();
-      return;
-    }
-    const sourcePath = await open({ multiple: false, directory: false, filters: [{ name: "PDF 航图", extensions: ["pdf"] }] });
-    if (!sourcePath || Array.isArray(sourcePath)) return;
-    try {
-      const cachedPath = await cacheChartPdf(sourcePath, selected?.id ?? `manual-${crypto.randomUUID()}`);
-      imageRequestRef.current += 1;
-      setImageSource("");
-      setImageLoading(false);
-      setImageSize({ width: 0, height: 0 });
-      setPdfSource(convertFileSrc(cachedPath));
-      setFileName(sourcePath.split(/[\\/]/).pop() ?? "航图.pdf");
-      setError("");
-      resetPdfTools();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "无法导入航图");
-    }
-  };
+    return counts;
+  }, [charts, source, localForAirport]);
 
-  const pageWidth = Math.max(280, Math.round(viewerWidth * zoom));
-  const imageBaseWidth = Math.max(280, Math.min(imageSize.width || viewerWidth, viewerWidth));
-  const imageWidth = Math.round(imageBaseWidth * zoom);
-  const imageHeight = Math.round(imageWidth * (imageSize.height && imageSize.width ? imageSize.height / imageSize.width : 1.414));
-  const imageQuarterTurn = rotation % 180 !== 0;
-  const rotatedImageWidth = imageQuarterTurn ? imageHeight : imageWidth;
-  const rotatedImageHeight = imageQuarterTurn ? imageWidth : imageHeight;
-  const imageTransform = rotation === 90 ? `translate(${imageHeight}px, 0) rotate(90deg)` : rotation === 180 ? `translate(${imageWidth}px, ${imageHeight}px) rotate(180deg)` : rotation === 270 ? `translate(0, ${imageWidth}px) rotate(270deg)` : "none";
+  return <div className="chart-page">
+    <aside className="chart-side">
+      <div className="chart-side-head">
+        <span className="side-mark" />
+        <h2>航图库</h2>
+        <button className="icon-btn" onClick={() => setAirportPicker((value) => !value)} aria-label="机场列表"><Grid2x2 size={15} /></button>
+      </div>
+      <div className="chart-ap-row">
+        <button className="back-inline" onClick={() => setAirportPicker(true)}><ChevronLeft size={14} />机场列表</button>
+        <h3>{icao}<span>{headerName ? ` ${headerName.replace(/国际机场|机场/g, "")}` : ""}</span></h3>
+        <span className="count">{tab === "charts"
+          ? `${source === "jepp" ? charts.length : localForAirport.length} 份`
+          : tab === "info"
+            ? `${overview.data?.runways.length ?? 0} 跑道`
+            : `${(procedures.data?.[procKind] ?? []).length} 程序`}</span>
+        <a className="icon-btn" href="/settings" aria-label="数据源设置"><Settings2 size={14} /></a>
+      </div>
 
-  return <div className="chart-page split-page">
-    <section className="panel chart-sidebar">
-      <div className="chart-source-selector"><button className={source === "local" ? "active" : ""} onClick={() => switchSource("local")}>本地航图库</button><button className={source === "navigraph" ? "active" : ""} onClick={() => switchSource("navigraph")}>NAVIGRAPH</button><button className={source === "chartfox" ? "active" : ""} onClick={() => switchSource("chartfox")}>CHARTFOX</button></div>
-      {source === "local" ? <>
-        <div className="local-library-actions"><button className="button secondary" onClick={() => chooseLibrary("folder")} disabled={localLibraryMutation.isPending}><FolderOpen size={16} />选择文件夹</button><button className="button secondary" onClick={() => chooseLibrary("zip")} disabled={localLibraryMutation.isPending}><Archive size={16} />选择 ZIP</button></div>
-        <p className="source-description">选择 <code>Terminal</code> 文件夹或其上级目录。第一层 <code>&lt;ICAO&gt;/</code> 文件夹用于机场分类，同级 <code>Charts.csv</code> 用于读取航图编号和类型。</p>
-        <p className={localLibrary.data?.ready ? "local-library-status" : "chartfox-state"}>{localLibraryMutation.isPending ? "正在扫描本地航图库…" : localLibraryMutation.isError ? localLibraryMutation.error.message : localLibrary.data?.message}</p>
-        {localLibrary.data?.ready && !selectedAirport && <>
-          <div className="local-airport-browser-heading"><div><strong>全部机场</strong><span>{airportGroups.length} 个机场</span></div><small>选择机场后查看该机场的全部航图</small></div>
-          <div className="search-box"><Search size={18} /><input placeholder="搜索机场 ICAO" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-          <div className="local-airport-grid">{localCharts.isFetching && <p className="chartfox-state">正在读取航图目录…</p>}{visibleAirportGroups.map((group) => <button className="local-airport-card" key={group.airport} onClick={() => chooseAirport(group.airport)}><span className="local-airport-icon"><Building2 size={20} /></span><span><strong>{group.airport}</strong><small>{group.charts.length} 份航图</small><em>{airportChartSummary(group.charts)}</em></span><ChevronRight size={18} /></button>)}{!localCharts.isFetching && visibleAirportGroups.length === 0 && <p className="chartfox-state">没有匹配的机场。</p>}</div>
-        </>}
-        {localLibrary.data?.ready && selectedAirport && <>
-          <div className="local-airport-breadcrumb"><button onClick={leaveAirport}><ArrowLeft size={16} />全部机场</button><div><strong>{selectedAirport}</strong><span>{airportGroups.find((group) => group.airport === selectedAirport)?.charts.length ?? 0} 份航图</span></div></div>
-          <div className="search-box"><Search size={18} /><input placeholder={`搜索 ${selectedAirport} 航图`} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-          <div className="chart-filter">{(["全部", "机场", "进场", "离场", "航路"] as const).map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div>
-          <div className="chart-list">{visibleAirportCharts.map((chart) => <button key={chart.id} onClick={() => chooseLocalChart(chart)} className={selected?.id === chart.id ? "selected" : ""}><FileText size={18} /><span><strong>{chart.title}</strong><small>{chart.category} · {chart.revision}</small></span><Download size={15} className="cached-icon" /></button>)}{visibleAirportCharts.length === 0 && <p className="chartfox-state">当前筛选条件下没有航图。</p>}</div>
-        </>}
-      </> : source === "navigraph" ? <>
-        <div className="chartfox-search"><label>ICAO 机场代码<input value={navigraphIcao} maxLength={4} onChange={(event) => { setNavigraphIcao(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setSelected(null); setExternalChartUrl(""); resetPreview(); }} /></label><button className="icon-button" onClick={() => navigraph.refetch()} disabled={navigraph.isFetching || navigraphIcao.length !== 4} aria-label="刷新 NAVIGRAPH"><RefreshCw className={navigraph.isFetching ? "spinning" : ""} size={17} /></button></div>
-        <p className="source-description">NAVIGRAPH 航图按用途分为 STAR、APP、TAXI、SID、REF 五类，点击航图即可下载并预览。</p>
-        <div className="airport-chart-filters navigraph-chart-filters">{(["STAR", "APP", "TAXI", "SID", "REF"] as const).map((item) => <button key={item} data-category={item} className={navigraphCategory === item ? "active" : ""} onClick={() => setNavigraphCategory(item)}>{item}</button>)}</div>
-        <div className="chart-list">{navigraph.isFetching && <p className="chartfox-state">正在查询 NAVIGRAPH…</p>}{navigraph.isError && <p className="chartfox-state error">{navigraph.error.message}</p>}{navigraph.data?.length === 0 && <p className="chartfox-state">此机场暂无可用航图。</p>}{navigraph.data && navigraph.data.length > 0 && visibleNavigraphCharts.length === 0 && <p className="chartfox-state">此机场暂无 {navigraphCategory} 类航图。</p>}{visibleNavigraphCharts.map((chart) => <button key={chart.id} onClick={() => chooseNavigraphChart(chart)} className={selected?.id === `navigraph-${chart.id}` ? "selected" : ""}><FileText size={18} /><span><strong>{chart.indexNumber} · {chart.name}</strong><small>{categoryForNavigraph(chart)} · 修订 {navigraphRevision(chart.revisionDate)}</small></span><Download size={15} className="cached-icon" /></button>)}</div>
-      </> : <>
-        <div className="chartfox-search"><label>ICAO 机场代码<input value={chartFoxIcao} maxLength={4} onChange={(event) => { setChartFoxIcao(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setSelected(null); setExternalChartUrl(""); resetPreview(); }} /></label><button className="icon-button" onClick={() => chartFox.refetch()} disabled={chartFox.isFetching || chartFoxIcao.length !== 4} aria-label="刷新 ChartFox"><RefreshCw className={chartFox.isFetching ? "spinning" : ""} size={17} /></button></div><p className="source-description">ChartFox 提供的航图索引。PDF 或图片链接会在应用内打开并启用完整预览工具，网页链接仍使用外部查看。</p><div className="chart-list">{chartFox.isFetching && <p className="chartfox-state">正在查询 ChartFox…</p>}{chartFox.isError && <p className="chartfox-state error">{chartFox.error.message}</p>}{chartFox.data?.length === 0 && <p className="chartfox-state">此机场暂无可用航图。</p>}{chartFox.data?.map((chart) => <button key={chart.id} onClick={() => chooseChartFox(chart)} className={selected?.id === `chartfox-${chart.id}` ? "selected" : ""}><FileText size={18} /><span><strong>{chart.title}</strong><small>{chart.chartType || "CHARTFOX"} · {chartFoxIcao}</small></span><ExternalLink size={15} className="cached-icon" /></button>)}</div>
-      </>}
-    </section>
-    <section className="chart-viewer">
-      <div className="chart-viewer-header"><div><p className="eyebrow">{selected ? `${selected.airport} · ${source === "navigraph" ? "NAVIGRAPH" : source === "chartfox" ? "CHARTFOX" : selected.category}` : "航图预览"}</p><h2>{pdfSource || imageSource ? fileName : selected?.title ?? "请选择机场与航图"}</h2></div><StatusBadge tone={pdfSource || imageSource ? "success" : selected ? "warning" : "neutral"}>{pdfSource ? "本地已打开" : imageSource ? "航图已打开" : imageLoading ? "正在加载" : selected ? source === "chartfox" ? "在线索引" : "未打开" : "等待选择"}</StatusBadge></div>
-      <input className="visually-hidden" ref={inputRef} type="file" accept="application/pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) loadPdf(file); }} />
-      {pdfSource ? <>
-        <div className="pdf-toolbar">
-          <div className="pdf-toolbar-group"><button onClick={() => changeZoom(-0.1)} disabled={zoom <= 0.5} aria-label="缩小航图" title="缩小"><Minus size={17} /></button><button className="pdf-zoom-value" onClick={() => setZoom(1)} title="恢复适应宽度">{Math.round(zoom * 100)}%</button><button onClick={() => changeZoom(0.1)} disabled={zoom >= 3} aria-label="放大航图" title="放大"><Plus size={17} /></button></div>
-          <div className="pdf-toolbar-group"><button onClick={rotatePreview} title="顺时针旋转"><RotateCw size={17} /><span>旋转</span></button><button className={drawMode ? "active" : ""} onClick={() => setDrawMode((current) => !current)} aria-pressed={drawMode} title="画笔标注"><PenLine size={17} /><span>画笔</span></button><button onClick={clearInk} disabled={!hasInk} title="清除当前页标注"><Trash2 size={17} /><span>清除</span></button></div>
-          <div className="pdf-toolbar-group pdf-page-controls"><button disabled={pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)} aria-label="上一页"><ChevronLeft size={17} /></button><span>{pageNumber} / {pageCount || "–"}</span><button disabled={pageCount === 0 || pageNumber >= pageCount} onClick={() => setPageNumber((page) => page + 1)} aria-label="下一页"><ChevronRight size={17} /></button></div>
+      {airportPicker && <div className="airport-pop">
+        <label className="input-icon">
+          <Search size={14} />
+          <input autoFocus value={airportQuery} onChange={(event) => setAirportQuery(event.target.value)} placeholder="搜索 ICAO / IATA / 机场名" />
+        </label>
+        <div className="airport-pop-list">
+          {filteredAirports.map((item) => <button key={item.icao} className={item.icao === icao ? "active" : ""} onClick={() => { setIcao(item.icao); setAirportPicker(false); setAirportQuery(""); setSelected(null); }}>
+            <code>{item.icao}</code>
+            <span><strong>{item.name}</strong><small>{item.city} · {item.iata}</small></span>
+          </button>)}
         </div>
-        <div className="pdf-viewer" ref={viewerRef}><Document file={pdfSource} onLoadSuccess={({ numPages }: { numPages: number }) => { setPageCount(numPages); setPageNumber(1); }} onLoadError={(reason) => setError(`无法读取 PDF：${reason instanceof Error ? reason.message : "文件加载失败"}`)} loading={<div className="pdf-loading">正在渲染航图…</div>}><div className="pdf-page-stage" ref={pageStageRef}><Page pageNumber={pageNumber} width={pageWidth} rotate={rotation} renderTextLayer renderAnnotationLayer /><canvas ref={inkCanvasRef} className={`pdf-ink-canvas ${drawMode ? "active" : ""}`} onPointerDown={startInk} onPointerMove={continueInk} onPointerUp={finishInk} onPointerCancel={finishInk} /></div></Document></div>
-      </> : imageSource ? <>
-        <div className="pdf-toolbar">
-          <div className="pdf-toolbar-group"><button onClick={() => changeZoom(-0.1)} disabled={zoom <= 0.5} aria-label="缩小航图" title="缩小"><Minus size={17} /></button><button className="pdf-zoom-value" onClick={() => setZoom(1)} title="恢复适应宽度">{Math.round(zoom * 100)}%</button><button onClick={() => changeZoom(0.1)} disabled={zoom >= 3} aria-label="放大航图" title="放大"><Plus size={17} /></button></div>
-          <div className="pdf-toolbar-group"><button onClick={rotatePreview} title="顺时针旋转"><RotateCw size={17} /><span>旋转</span></button><button className={drawMode ? "active" : ""} onClick={() => setDrawMode((current) => !current)} aria-pressed={drawMode} title="画笔标注"><PenLine size={17} /><span>画笔</span></button><button onClick={clearInk} disabled={!hasInk} title="清除标注"><Trash2 size={17} /><span>清除</span></button></div>
+      </div>}
+
+      <div className="seg block" style={{ margin: "0 10px 10px" }}>
+        <button className={tab === "charts" ? "active" : ""} onClick={() => setTab("charts")}>航图</button>
+        <button className={tab === "info" ? "active" : ""} onClick={() => setTab("info")}>信息</button>
+        <button className={tab === "procedures" ? "active" : ""} onClick={() => setTab("procedures")}>程序</button>
+      </div>
+
+      {tab === "charts" ? <>
+        <div className="chart-search">
+          <Search size={14} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索图号 / 程序名，如 10-9 或 ILS" />
+          {query && <button onClick={() => setQuery("")} aria-label="清除"><X size={13} /></button>}
         </div>
-        <div className="chart-image-viewer" ref={viewerRef}><div className="chart-image-stage" ref={pageStageRef} style={{ width: rotatedImageWidth, height: rotatedImageHeight }}><img src={imageSource} alt={selected?.title ?? "在线航图"} style={{ width: imageWidth, transform: imageTransform }} onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => { setImageSource(""); setError("航图图片加载失败"); }} /><canvas ref={inkCanvasRef} className={`pdf-ink-canvas ${drawMode ? "active" : ""}`} onPointerDown={startInk} onPointerMove={continueInk} onPointerUp={finishInk} onPointerCancel={finishInk} /></div></div>
-      </> : <div className="chart-placeholder"><BookOpen size={42} /><strong>{imageLoading ? "正在下载航图…" : selected ? source === "chartfox" ? "在线航图索引" : "尚未打开航图" : "没有正在预览的航图"}</strong><p>{imageLoading ? "正在获取航图文件，请稍候。" : selected ? source === "chartfox" ? "此链接无法在应用内读取时，可使用下方按钮在 ChartFox 查看。" : "点击本地或 NAVIGRAPH 航图可直接打开，也可导入 PDF。" : "先选择本地航图库或在线航图来源中的机场与航图。"}</p></div>}
-      <div className="chart-controls"><button className="button secondary" onClick={importPdf}><FilePlus2 size={17} />导入单份 PDF</button>{externalChartUrl && <a className="button secondary" href={externalChartUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />{source === "chartfox" ? "在 ChartFox 查看" : "打开原始航图"}</a>}{!isTauri() && <span className="chart-cache-note"><BookOpen size={15} />浏览器模式仅临时预览</span>}</div>
-      {error && <p className="form-error">{error}</p>}
-      <div className="chart-meta"><span>来源：{source === "navigraph" ? "NAVIGRAPH" : source === "chartfox" ? "ChartFox" : localLibrary.data?.sourceType === "zip" ? "本地 ZIP" : "本地文件夹"}</span><span>格式：{imageSource || source === "navigraph" ? "图片" : "PDF"}</span><span>请遵守数据源的使用条款</span></div>
+        <div className="chart-filter-row">
+          <span className="filter-label">图种</span>
+          {KIND_CHIPS[source].map((value) => <button
+            key={value}
+            className={`chip ${kind === value ? "active" : ""}`}
+            onClick={() => setKind(value)}
+          >{value}<em className="chip-count">{kindCounts[value] ?? 0}</em></button>)}
+        </div>
+        <div className="chart-filter-row">
+          <span className="filter-label">来源</span>
+          <button className={`chip ${source === "jepp" ? "active" : ""}`} onClick={() => setSource("jepp")}>
+            JeppQuery<em className="chip-count">{charts.length}</em>
+          </button>
+          <button
+            className={`chip ${source === "local" ? "active" : ""}`}
+            onClick={() => setSource("local")}
+            disabled={!localForAirport.length}
+            title={localForAirport.length ? `${library.data?.airportCount ?? 0} 个机场 · ${library.data?.chartCount ?? 0} 份本地航图` : "先在设置里选择 NAIP 数据文件夹"}
+          >本地 Terminal<em className="chip-count">{localForAirport.length}</em></button>
+        </div>
+        <div className="chart-side-body">
+          {source === "jepp" ? <>
+            {jepp.isFetching && charts.length === 0 && <p className="empty">正在获取航图目录…</p>}
+            {jepp.isError && <div className="empty">
+              <p>无法连接航图服务</p>
+              <p className="muted" style={{ marginTop: 6 }}>{(jepp.error as Error)?.message ?? "请稍后重试，或改用本地航图库"}</p>
+            </div>}
+            {!jepp.isFetching && !jepp.isError && visible.length === 0 && <p className="empty">没有匹配的航图</p>}
+            {visible.map((chart) => {
+              const rwy = chartRunways(chart);
+              return <button key={chart.filename} className={`chart-item ${selected?.filename === chart.filename ? "active" : ""}`}
+                onClick={() => setSelected(chart)}
+                // 悬停预热：扫过列表就开始把 PDF 拉到本地缓存，点开几乎秒出。
+                onMouseEnter={() => prefetchChartFile(chart.icao || icao, chart.filename)}
+                onFocus={() => prefetchChartFile(chart.icao || icao, chart.filename)}
+              >
+                <span className="ci-thumb"><FileText size={14} /></span>
+                <span className="ci-main">
+                  <strong>{chart.index_no} · {chart.proc_id || chart.type_name}</strong>
+                  <small>
+                    {chartKind(chart.category)} · {dateLabel(chart.date_rev)}
+                    {rwy ? ` · RWY ${rwy}` : ""}
+                    {chart.ilsText ? ` · ILS ${chart.ilsText}` : ""}
+                    {chart.precision_approach ? " · 精密进近" : ""}
+                    {chart.is_vfr ? " · VFR" : ""}
+                    {chart.geo_bounds?.coverage ? " · 可定位" : ""}
+                    {chart.has_tcl === false ? " · 未抽取" : ""}
+                  </small>
+                </span>
+                <ChevronRight size={13} style={{ color: "var(--muted-2)" }} />
+              </button>;
+            })}
+          </> : <>
+            {local.isFetching && <p className="empty">正在读取本地航图索引…</p>}
+            {local.isError && <p className="empty">{(local.error as Error)?.message ?? "读取本地航图库失败"}</p>}
+            {!local.isFetching && !library.data?.ready && <p className="empty">还没有选择本地数据包，请到设置里选择 NAIP 数据文件夹。</p>}
+            {library.data?.ready && !localForAirport.length && <p className="empty">本地航图库里没有 {icao} 的航图</p>}
+            {library.data?.ready && localForAirport.length > 0 && visibleLocal.length === 0 && <p className="empty">没有匹配的航图</p>}
+            {visibleLocal.map((chart) => <button
+              key={chart.id}
+              className={`chart-item ${localSelected?.id === chart.id ? "active" : ""}`}
+              onClick={() => void openLocal(chart)}
+              title={chart.id}
+            >
+              <span className="ci-thumb"><BookOpen size={14} /></span>
+              <span className="ci-main">
+                <strong>{chart.revision ? `${chart.revision} · ` : ""}{chart.chartType || chart.title}</strong>
+                <small>{[chart.name && chart.name !== chart.chartType ? chart.name : null, chart.category].filter(Boolean).join(" · ")}</small>
+              </span>
+              <ChevronRight size={13} style={{ color: "var(--muted-2)" }} />
+            </button>)}
+          </>}
+        </div>
+        <footer className="chart-pager">
+          <button disabled={page === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}><ChevronLeft size={14} />上一页</button>
+          <span>{listLength === 0 ? "0" : `${page * PAGE_SIZE + 1}-${Math.min(listLength, (page + 1) * PAGE_SIZE)}`} / {listLength} · 第 {page + 1}/{pageCountTotal} 页</span>
+          <button disabled={page + 1 >= pageCountTotal} onClick={() => setPage((value) => Math.min(pageCountTotal - 1, value + 1))}>下一页<ChevronRight size={14} /></button>
+        </footer>
+      </> : tab === "info" ? <div className="chart-side-body info-scroll">
+        {overview.isFetching && !overview.data && <p className="empty">正在获取机场资料…</p>}
+        {overview.isError && <p className="empty">{(overview.error as Error)?.message ?? "无法获取机场总览"}</p>}
+        {!overview.data && (xflyInfo.isFetching || xflyRunways.isFetching || xflyFreqs.isFetching) &&
+          !xflyInfo.data && !(xflyRunways.data ?? []).length && !(xflyFreqs.data ?? []).length &&
+          <p className="empty">正在获取机场资料…</p>}
+        {/* Jepp 没有该机场（404 / 超时）时整页回落到 XFS 数据。 */}
+        {!overview.data && !overview.isFetching && ((xflyInfo.data && (xflyInfo.data.cnName || xflyInfo.data.enName || xflyInfo.data.elevationFt != null)) || (xflyRunways.data ?? []).length > 0 || (xflyFreqs.data ?? []).length > 0) && <>
+          <p className="muted" style={{ margin: "0 0 12px", fontSize: 10.5 }}>
+            航图服务上没有该机场的导航数据，以下信息来自 XFS。
+          </p>
+          <div className="info-cycle">
+            <span>机场</span>
+            <strong>{xflyInfo.data?.cnName || xflyInfo.data?.enName || icao}</strong>
+            <small>{[xflyInfo.data?.municipalityCn || xflyInfo.data?.municipality, xflyInfo.data?.iataCode, xflyInfo.data?.elevationFt != null ? `标高 ${xflyInfo.data.elevationFt.toLocaleString("en-US")} ft` : ""].filter(Boolean).join(" · ")}</small>
+          </div>
+
+          <h3 className="info-title">跑道</h3>
+          <table className="freq-table">
+            <thead><tr><th>跑道</th><th>长度</th><th>道面</th><th>入口标高</th></tr></thead>
+            <tbody>
+              {(xflyRunways.data ?? []).map((row) => <tr key={`${row.leIdent}-${row.heIdent}`}>
+                <td className="mono">{row.leIdent}/{row.heIdent}</td>
+                <td>{Number(row.lengthFt)?.toLocaleString("en-US") ?? "—"} ft</td>
+                <td>{surfaceLabel(row.surface)}</td>
+                <td>{row.leElevationFt || "—"} / {row.heElevationFt || "—"} ft</td>
+              </tr>)}
+              {!(xflyRunways.data ?? []).length && <tr><td colSpan={4} className="muted">暂无跑道数据</td></tr>}
+            </tbody>
+          </table>
+
+          <h3 className="info-title">管制单位及频率</h3>
+          <table className="freq-table">
+            <thead><tr><th>单位</th><th>频率（MHz）</th></tr></thead>
+            <tbody>
+              {(xflyFreqs.data ?? []).map((row) => <tr key={`${row.type}-${row.description}-${row.frequencyMhz}`}>
+                <td>{row.description || row.type}</td>
+                <td className="mono">{formatMhz(Number(row.frequencyMhz))}</td>
+              </tr>)}
+              {!(xflyFreqs.data ?? []).length && <tr><td colSpan={2} className="muted">暂无频率数据</td></tr>}
+            </tbody>
+          </table>
+        </>}
+        {!overview.data && !overview.isFetching && !xflyInfo.isFetching && !xflyRunways.isFetching && !xflyFreqs.isFetching &&
+          !(xflyInfo.data && (xflyInfo.data.cnName || xflyInfo.data.enName)) && !(xflyRunways.data ?? []).length && !(xflyFreqs.data ?? []).length &&
+          <p className="empty">航图服务与 XFS 上都没有该机场的数据</p>}
+
+        {overview.data && <>
+          <div className="info-cycle">
+            <span>数据周期</span>
+            <strong>AIRAC {cycleLabel(overview.data.cycle)}</strong>
+            <small>{compactDate(overview.data.cycle?.effective)} → {compactDate(overview.data.cycle?.expiration)}{overview.data.cycle?.version ? ` · ${overview.data.cycle.version}` : ""}</small>
+          </div>
+          <p className="muted" style={{ margin: "0 0 12px", fontSize: 10.5 }}>
+            标高 {overview.data.elevation_ft?.toLocaleString("en-US") ?? "—"} ft · 磁差 {overview.data.magnetic_variation || "—"} · {overview.data.utc_offset || "—"}
+          </p>
+
+          <h3 className="info-title">跑道</h3>
+          <table className="freq-table">
+            <thead><tr><th>跑道</th><th>长度</th><th>道面</th><th>标高</th></tr></thead>
+            <tbody>
+              {overview.data.runways.map((row) => <tr key={row.ident}>
+                <td className="mono">{row.ident}</td>
+                <td>{row.length_ft?.toLocaleString("en-US")} ft</td>
+                <td>{surfaceByIdent.get(row.ident.toUpperCase()) ?? (row.surface_code != null ? `代码 ${row.surface_code}` : "—")}</td>
+                <td>{row.elevation_ft} ft</td>
+              </tr>)}
+              {!overview.data.runways.length && <tr><td colSpan={4} className="muted">暂无跑道数据</td></tr>}
+            </tbody>
+          </table>
+
+          <h3 className="info-title">管制单位及频率</h3>
+          <table className="freq-table">
+            <thead><tr><th>单位</th><th>频率（MHz）</th></tr></thead>
+            <tbody>
+              {groupComms(overview.data.comms).map((group) => <tr key={group.type}>
+                <td>{commLabels[group.type] ?? group.type}</td>
+                <td className="mono">{group.values.map(formatMhz).join(" · ")}</td>
+              </tr>)}
+              {!overview.data.comms.length && <tr><td colSpan={2} className="muted">暂无频率数据</td></tr>}
+            </tbody>
+          </table>
+
+          <h3 className="info-title">ILS</h3>
+          <table className="freq-table">
+            <thead><tr><th>识别码</th><th>跑道</th><th>频率</th><th>下滑角</th></tr></thead>
+            <tbody>
+              {overview.data.ils.map((row) => <tr key={`${row.ident}-${row.runway}`}>
+                <td className="mono">{row.ident}</td>
+                <td className="mono">{row.runway}</td>
+                <td className="mono">{row.frequency_mhz.toFixed(2)}</td>
+                <td>{row.glide_slope?.toFixed(1) ?? "—"}°</td>
+              </tr>)}
+              {!overview.data.ils.length && <tr><td colSpan={4} className="muted">暂无 ILS 数据</td></tr>}
+            </tbody>
+          </table>
+        </>}
+      </div> : <div className="chart-side-body info-scroll">
+        <div className="seg block" style={{ marginBottom: 10 }}>
+          <button className={procKind === "sid" ? "active" : ""} onClick={() => { setProcKind("sid"); setProcName(null); }}>SID 离场</button>
+          <button className={procKind === "star" ? "active" : ""} onClick={() => { setProcKind("star"); setProcName(null); }}>STAR 进场</button>
+        </div>
+
+        {currentProc ? <>
+          <button className="back-inline" style={{ marginBottom: 8 }} onClick={() => setProcName(null)}>
+            <ChevronLeft size={14} />程序列表
+          </button>
+          <h3 className="info-title">路径点 · {currentProc.name} <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{currentProc.runway}</span></h3>
+          <table className="freq-table">
+            <thead><tr><th>#</th><th>点</th><th>类型</th><th>坐标</th></tr></thead>
+            <tbody>
+              {currentProc.path.map((point, index) => <tr key={`${point.ident}-${index}`}>
+                <td className="muted" style={{ width: 20 }}>{index + 1}</td>
+                <td className="mono">{point.ident ?? "—"}</td>
+                <td>{point.kind === "ENRT" ? "航路" : point.kind === "TERM" ? "终端" : "—"}</td>
+                <td className="mono" style={{ fontSize: 10 }}>
+                  {point.latitude == null || point.longitude == null
+                    ? "—"
+                    : `${point.latitude.toFixed(3)} / ${point.longitude.toFixed(3)}`}
+                </td>
+              </tr>)}
+            </tbody>
+          </table>
+        </> : <>
+          {procedures.isFetching && <p className="empty">正在解析程序目录…</p>}
+          {procedures.isError && <p className="empty">{(procedures.error as Error)?.message ?? "无法获取程序目录"}</p>}
+          {procedureList.map((proc) => <button
+            key={`${proc.name}-${proc.runway}`}
+            className="chart-item"
+            onClick={() => setProcName(`${proc.name}-${proc.runway}`)}
+          >
+            <span className="ci-thumb"><Compass size={14} /></span>
+            <span className="ci-main"><strong>{proc.name}</strong><small>{proc.runway || "全部跑道"} · {proc.points} 个路径点</small></span>
+            <ChevronRight size={13} style={{ color: "var(--muted-2)" }} />
+          </button>)}
+          {!procedures.isFetching && !procedures.isError && procedureList.length === 0 && <p className="empty">没有该类型程序</p>}
+        </>}
+      </div>}
+    </aside>
+
+    <section className="chart-viewer-pane">
+      <div className="viewer-toolbar">
+        <button onClick={() => selected && setSelected({ ...selected })} aria-label="重新加载"><RotateCcw size={14} /></button>
+        <button disabled={pageNumber <= 1} onClick={() => setPageNumber((value) => Math.max(1, value - 1))} aria-label="上一页"><ChevronLeft size={15} /></button>
+        <span className="zoom-val">{pageNumber} / {pageCount}</span>
+        <button disabled={pageNumber >= pageCount} onClick={() => setPageNumber((value) => Math.min(pageCount, value + 1))} aria-label="下一页"><ChevronRight size={15} /></button>
+        <span className="sep" />
+        <button onClick={() => setZoom((value) => Math.max(0.5, Number((value - 0.15).toFixed(2))))} aria-label="缩小"><Minus size={14} /></button>
+        <span className="zoom-val">{Math.round(zoom * 100)}%</span>
+        <button onClick={() => setZoom((value) => Math.min(3, Number((value + 0.15).toFixed(2))))} aria-label="放大"><Plus size={14} /></button>
+        <span className="sep" />
+        <button aria-label="图层"><Layers size={14} /></button>
+        <button className={pinned ? "active" : ""} onClick={() => setPinned((value) => !value)} aria-label="固定航图"><Pin size={14} />固定航图</button>
+      </div>
+
+      <div className="chart-viewer has-toolbar">
+        {pdfLoading ? <div className="chart-placeholder">
+          <FileText size={30} className="spinning" />
+          <strong>正在获取航图</strong>
+          <p>首次打开需要从航图服务取回 PDF，之后会命中本地缓存。</p>
+        </div> : pdfError ? <div className="chart-placeholder">
+          <FileText size={32} />
+          <strong>航图获取失败</strong>
+          <p>{pdfError}</p>
+        </div> : pdfUrl ? <div className="chart-canvas">
+          <Document
+            file={pdfUrl}
+            onLoadSuccess={({ numPages }) => { setPageCount(numPages); setPageNumber(1); }}
+            onLoadError={() => setPageCount(1)}
+            loading={<div className="chart-placeholder">正在渲染航图…</div>}
+            error={<div className="chart-placeholder"><FileText size={32} /><strong>航图渲染失败</strong><p>请确认航图服务可访问，且字体与打印驱动已就绪。</p></div>}
+          >
+            <Page pageNumber={pageNumber} width={820 * zoom} renderTextLayer={false} renderAnnotationLayer={false} />
+          </Document>
+        </div> : <div className="chart-placeholder">
+          <BookOpen size={40} />
+          <strong>选择左侧航图以查看</strong>
+          <p>{source === "local"
+            ? "当前来源是本地 Terminal 航图库，按图号、图名或图种筛选。"
+            : "航图来自 JeppQuery 服务，按图号、程序名或图种筛选。固定航图后会保留当前页面。"}</p>
+        </div>}
+      </div>
+
+      <div className="viewer-pager">
+        <button onClick={() => setPageNumber((value) => Math.max(1, value - 1))} disabled={pageNumber <= 1} aria-label="上一页"><ChevronLeft size={14} /></button>
+        <span>{pageNumber} / {pageCount}</span>
+        <button onClick={() => setPageNumber((value) => Math.min(pageCount, value + 1))} disabled={pageNumber >= pageCount} aria-label="下一页"><ChevronRight size={14} /></button>
+        <span className="sep" />
+        <span>{selected
+          ? `${selected.icao || icao} · ${selected.index_no} · ${selected.proc_id || selected.type_name}`
+          : localSelected
+            ? `${localSelected.airport} · ${localSelected.revision || "—"} · ${localSelected.chartType || localSelected.title}`
+            : "未选择航图"}</span>
+        {selected?.geo_bounds?.coverage && <>
+          <span className="sep" />
+          <span className="mono">{selected.geo_bounds.coverage.lon_min.toFixed(3)}–{selected.geo_bounds.coverage.lon_max.toFixed(3)}E · {selected.geo_bounds.coverage.lat_min.toFixed(3)}–{selected.geo_bounds.coverage.lat_max.toFixed(3)}N</span>
+        </>}
+      </div>
     </section>
   </div>;
 }
+
+export default ChartsPage;

@@ -1,52 +1,76 @@
 import { useEffect } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
-import {
-  Bell, BookOpen, ChevronLeft, ChevronRight, CloudSun, Compass, Gauge, Map, Menu, Moon, Plane, Settings, Sun,
-} from "lucide-react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { BookOpenCheck, ChevronLeft, ChevronRight, CloudSun, Layers3, Plane, Route, Settings2 } from "lucide-react";
+import { TopBar } from "./TopBar";
 import { useAppStore } from "../../stores/app-store";
 
-const navigation = [
-  { to: "/", label: "概览", icon: Gauge },
-  { to: "/map", label: "航图地图", icon: Map },
-  { to: "/flight-plans", label: "飞行计划", icon: Plane },
-  { to: "/airports", label: "机场信息", icon: Compass },
-  { to: "/charts", label: "航图库", icon: BookOpen },
-  { to: "/weather", label: "天气与通告", icon: CloudSun },
+const navItems = [
+  { path: "/charts", icon: BookOpenCheck, label: "航图库" },
+  { path: "/weather", icon: CloudSun, label: "气象" },
+  { path: "/", icon: Layers3, label: "矢量地图" },
+  { path: "/dispatch", icon: Route, label: "航路规划" },
+  { path: "/airports", icon: Plane, label: "机场资料" },
 ];
 
+const titles: Record<string, string> = {
+  "/": "矢量地图",
+  "/charts": "航图",
+  "/weather": "气象",
+  "/dispatch": "飞行计划",
+  "/airports": "机场资料",
+  "/settings": "设置",
+};
+
 export function AppShell() {
-  const { sidebarCollapsed, toggleSidebar, theme, setTheme } = useAppStore();
-  const location = useLocation();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const theme = useAppStore((state) => state.theme);
+  const railHidden = useAppStore((state) => state.railHidden);
+  const toggleRail = useAppStore((state) => state.toggleRail);
 
-  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
 
-  const title = navigation.find((item) => item.to === location.pathname)?.label ?? "SkyBoard EFB";
-  return <div className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><Plane size={21} /></div><span>SkyBoard</span></div>
-      <nav aria-label="主导航">{navigation.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === "/"} className="nav-item">
-        <Icon size={20} /><span>{label}</span>
-      </NavLink>)}</nav>
-      <div className="sidebar-bottom">
-        <NavLink to="/settings" className="nav-item"><Settings size={20} /><span>设置</span></NavLink>
-        <button className="collapse-button" onClick={toggleSidebar} aria-label="收起侧栏">
-          {sidebarCollapsed ? <ChevronRight size={18} /> : <><ChevronLeft size={18} /><span>收起菜单</span></>}
-        </button>
-      </div>
-    </aside>
-    <main className="main-area">
-      <header className="topbar">
-        <button className="icon-button mobile-menu" onClick={toggleSidebar} aria-label="导航菜单"><Menu size={21} /></button>
-        <div><p className="eyebrow">ELECTRONIC FLIGHT BAG</p><h1>{title}</h1></div>
-        <div className="topbar-actions">
-          <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={theme === "dark" ? "切换为白色页面" : "切换为深色页面"} title={theme === "dark" ? "切换为白色页面" : "切换为深色页面"}>
-            {theme === "dark" ? <><Sun size={17} /><span>白色页面</span></> : <><Moon size={17} /><span>深色页面</span></>}
-          </button>
-          <button className="icon-button" aria-label="通知"><Bell size={19} /></button>
-          <div className="avatar">EF</div>
+  const title = titles[pathname] ?? "SkyBoard";
+
+  return <div className="efb-shell">
+    <TopBar title={title} />
+    <div className="app-body">
+      {!railHidden && <nav className="rail" aria-label="主导航">
+        <div className="rail-top">
+          <button className="rail-back" onClick={() => navigate(-1)} title="返回"><ChevronLeft size={16} /></button>
         </div>
-      </header>
-      <section className="page-content"><Outlet /></section>
-    </main>
+        <div className="rail-nav">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = item.path === "/" ? pathname === "/" : pathname.startsWith(item.path);
+            return <button
+              key={item.path}
+              className={`rail-btn ${active ? "active" : ""}`}
+              onClick={() => navigate(item.path)}
+              aria-label={item.label}
+              aria-current={active ? "page" : undefined}
+            >
+              <Icon size={19} strokeWidth={1.85} />
+              <span className="rail-tip">{item.label}</span>
+            </button>;
+          })}
+        </div>
+        <div className="rail-bottom">
+          <button className={`rail-btn ${pathname === "/settings" ? "active" : ""}`} onClick={() => navigate("/settings")} aria-label="设置">
+            <Settings2 size={19} strokeWidth={1.85} />
+            <span className="rail-tip">设置</span>
+          </button>
+        </div>
+      </nav>}
+      <main className="main">
+        {railHidden && <button className="rail-restore" onClick={toggleRail} title="显示图标栏"><ChevronRight size={15} /></button>}
+        <Outlet />
+      </main>
+    </div>
   </div>;
 }
+
+export default AppShell;
